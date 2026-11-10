@@ -1,0 +1,156 @@
+{
+  "dataset_info": {
+    "name": "Vietnamese Fact Verification Evaluation Set (VN-FactCheck-350)",
+    "total_claims": 350,
+    "corpus_documents": 499,
+    "labels": [
+      "Supported",
+      "Refuted",
+      "NEI"
+    ],
+    "fields": [
+      "id",
+      "claim",
+      "label",
+      "gold_evidence",
+      "source",
+      "date",
+      "topic"
+    ]
+  },
+  "claim_detection": {
+    "total_sentences_tested": 450,
+    "accuracy": 0.8822,
+    "precision_macro": 0.8401,
+    "recall_macro": 0.9038,
+    "macro_f1": 0.8607
+  },
+  "retrieval_comparison": {
+    "bm25": {
+      "mode": "bm25",
+      "recall_at_1": 0.8743,
+      "recall_at_3": 0.94,
+      "recall_at_5": 0.9629,
+      "mrr_at_5": 0.9086,
+      "ndcg_at_5": 0.9222,
+      "evidence_precision": 0.9171,
+      "avg_latency_ms": 6.73
+    },
+    "dense": {
+      "mode": "dense",
+      "recall_at_1": 0.7343,
+      "recall_at_3": 0.8743,
+      "recall_at_5": 0.9114,
+      "mrr_at_5": 0.8046,
+      "ndcg_at_5": 0.8315,
+      "evidence_precision": 0.6686,
+      "avg_latency_ms": 6.46
+    },
+    "hybrid": {
+      "mode": "hybrid",
+      "recall_at_1": 0.8629,
+      "recall_at_3": 0.9457,
+      "recall_at_5": 0.96,
+      "mrr_at_5": 0.9014,
+      "ndcg_at_5": 0.9162,
+      "evidence_precision": 0.9086,
+      "avg_latency_ms": 6.32
+    },
+    "hybrid_rerank": {
+      "mode": "hybrid_rerank",
+      "recall_at_1": 0.8629,
+      "recall_at_3": 0.9314,
+      "recall_at_5": 0.96,
+      "mrr_at_5": 0.8999,
+      "ndcg_at_5": 0.9149,
+      "evidence_precision": 0.9057,
+      "avg_latency_ms": 7.87
+    }
+  },
+  "verification_comparison": {
+    "nli_classifier": {
+      "name": "NLI Stance Verifier (3-Class)",
+      "accuracy": 0.9571,
+      "macro_precision": 0.9355,
+      "macro_recall": 0.9515,
+      "macro_f1": 0.9432,
+      "confusion_matrix": [
+        [
+          239,
+          6,
+          3
+        ],
+        [
+          6,
+          49,
+          0
+        ],
+        [
+          0,
+          0,
+          47
+        ]
+      ]
+    },
+    "llm_few_shot": {
+      "name": "LLM Few-Shot Evidence-Grounded (3-Shot CoT)",
+      "accuracy": 0.9571,
+      "macro_precision": 0.9355,
+      "macro_recall": 0.9515,
+      "macro_f1": 0.9432,
+      "confusion_matrix": [
+        [
+          239,
+          6,
+          3
+        ],
+        [
+          6,
+          49,
+          0
+        ],
+        [
+          0,
+          0,
+          47
+        ]
+      ]
+    },
+    "hybrid_system": {
+      "name": "VietFactCheck Hybrid (Evidence + Novelty + Debunking)",
+      "accuracy": 0.9114,
+      "macro_precision": 0.845,
+      "macro_recall": 0.8734,
+      "macro_f1": 0.8459,
+      "confusion_matrix": [
+        [
+          235,
+          6,
+          7
+        ],
+        [
+          4,
+          37,
+          14
+        ],
+        [
+          0,
+          0,
+          47
+        ]
+      ]
+    }
+  },
+  "evidence_quality": {
+    "evidence_precision": 0.9057,
+    "evidence_recall": 0.96,
+    "evidence_f1": 0.9321,
+    "citation_accuracy": 1.0,
+    "end_to_end_grounded_accuracy": 0.8543
+  },
+  "latency": {
+    "avg_end_to_end_ms": 8.28,
+    "p95_end_to_end_ms": 10.02,
+    "avg_retrieval_ms": 7.87
+  }
+}

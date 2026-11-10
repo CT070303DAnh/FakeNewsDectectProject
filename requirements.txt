@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+pandas
+scikit-learn
+joblib
+underthesea
+tensorflow
+keras
+transformers
+torch
+accelerate
+python-multipart
+gensim
+matplotlib
+seaborn
+numpy
+psutil
