@@ -25,6 +25,7 @@ sys.path.append(BASE_DIR)
 
 # Import training functions
 from src.train import train_all_models
+from src.evaluate_benchmark import evaluate_all_benchmarks
 try:
     from src.train_phobert import train_phobert
     from src.train_sbert import train_sbert
@@ -107,6 +108,9 @@ def training_process_wrapper(model_type, epochs, data_dir, models_dir, queue):
     try:
         if model_type == 'all':
             train_all_models(data_dir, models_dir)
+            evaluate_all_benchmarks()
+        elif model_type == 'benchmark':
+            evaluate_all_benchmarks()
         elif model_type == 'phobert':
             train_phobert(data_dir, models_dir, epochs=epochs)
         elif model_type == 'sbert':
@@ -250,9 +254,9 @@ async def get_training_results():
             return json.load(f)
     return {}
 
-@app.get("/benchmark-metrics")
-async def get_benchmark_metrics():
-    bench_path = os.path.join(BASE_DIR, "models", "benchmark_metrics.json")
+@app.get("/benchmark-results")
+async def get_benchmark_results():
+    bench_path = os.path.join(BASE_DIR, "models", "factcheck_benchmark_metrics.json")
     if os.path.exists(bench_path):
         with open(bench_path, "r", encoding="utf-8") as f:
             return json.load(f)

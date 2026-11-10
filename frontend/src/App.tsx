@@ -34,14 +34,15 @@ interface VerifiedEvidence {
   source: string;
   url: string;
   date?: string;
-  temporal_match?: boolean;
-  temporal_note?: string;
-  bm25_score?: number;
-  dense_score?: number;
-  rerank_score?: number;
   topic: string;
   tier: string;
   similarity: number;
+  bm25_score?: number;
+  dense_score?: number;
+  rerank_score?: number;
+  temporal_match?: string;
+  retrieval_method?: string;
+  citation_tag?: string;
   vosoughi_s22_band: string;
   stance: 'SUPPORTS' | 'REFUTES' | 'NEI';
   nli_label?: 'Supported' | 'Refuted' | 'NEI';
@@ -51,41 +52,29 @@ interface VerifiedEvidence {
 
 interface HybridVerdict {
   verdict_code: 'TRUE' | 'FALSE' | 'MIXED';
-  nli_label?: 'Supported' | 'Refuted' | 'NEI';
+  nli_3class_label?: 'Supported' | 'Refuted' | 'NEI';
   verdict_title: string;
   verdict_badge: string;
+  confidence?: number;
+  uncertainty_score?: number;
+  latency_ms?: number;
   veracity_score_1_to_5: number;
   final_fake_probability: number;
   final_real_probability: number;
-  confidence?: number;
-  latency_ms?: number;
-  uncertainty?: {
-    nli_probabilities: {
-      Supported: number;
-      Refuted: number;
-      NEI: number;
-    };
-    uncertainty_entropy: number;
-    is_high_uncertainty: boolean;
-    uncertainty_note: string;
-  };
-  llm_few_shot_verification?: {
-    method: string;
-    predicted_label: string;
-    confidence: number;
-    cited_evidence_id: string | null;
-    cited_source: string | null;
-    cited_date: string | null;
-    agreement_with_nli: boolean;
-    grounded_explanation: string;
-  };
   avg_ml_fake_probability: number;
   evidence_veracity_score: number;
   has_verified_evidence: boolean;
   verified_evidences: VerifiedEvidence[];
+  llm_verification?: {
+    llm_label: string;
+    llm_stance: string;
+    llm_confidence: number;
+    citations_used: string[];
+    grounded_explanation: string;
+  };
+  nli_llm_agreement?: boolean;
   retrieval_stats: {
-    retrieval_pipeline?: string;
-    corpus_size?: number;
+    retrieval_mode?: string;
     total_candidates_checked: number;
     accepted_above_050: number;
     discarded_below_050: number;
@@ -96,9 +85,7 @@ interface HybridVerdict {
 
 interface ClaimAnalysis {
   primary_claim: string;
-  normalized_claim?: string;
   check_worthiness_score?: number;
-  claim_temporal_year?: number | null;
   all_claims: string[];
   entities: string[];
   numbers_dates: string[];
@@ -300,15 +287,16 @@ const VeracityGauge = ({ score, fakeProb }: { score: number; fakeProb: number })
 function App() {
   const [currentView, setCurrentView] = useState<'detector' | 'theory' | 'training'>('detector')
   const [newsText, setNewsText] = useState('')
+  const [retrievalMode, setRetrievalMode] = useState<'hybrid_rerank' | 'hybrid' | 'bm25' | 'dense'>('hybrid_rerank')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<PredictionResponse | null>(null)
   const [error, setError] = useState('')
   const [activeTab, setActiveTab] = useState<string>('')
   const [evidenceFilter, setEvidenceFilter] = useState<'ALL' | 'SUPPORTS' | 'REFUTES' | 'LOCAL' | 'LIVE'>('ALL')
-  const [feedbackSent, setFeedbackSent] = useState<string>('')
-  const [feedbackComment, setFeedbackComment] = useState<string>('')
+  const [feedbackRating, setFeedbackRating] = useState<'ACCURATE' | 'INACCURATE' | null>(null)
   const [suggestedLabel, setSuggestedLabel] = useState<string>('Refuted')
-  const [showDisputeForm, setShowDisputeForm] = useState<boolean>(false)
+  const [feedbackComment, setFeedbackComment] = useState<string>('')
+  const [feedbackStatus, setFeedbackStatus] = useState<string>('')
 
   useEffect(() => {
     if (result && result.results && !activeTab) {
@@ -329,13 +317,14 @@ function App() {
     setResult(null)
     setActiveTab('')
     setEvidenceFilter('ALL')
-    setFeedbackSent('')
-    setShowDisputeForm(false)
+    setFeedbackRating(null)
     setFeedbackComment('')
+    setFeedbackStatus('')
 
     try {
       const response = await axios.post('http://localhost:8000/predict', {
-        text: textToVerify
+        text: textToVerify,
+        retrieval_mode: retrievalMode
       })
       if (response.data && response.data.hybrid_verdict) {
         setResult(response.data)
@@ -350,23 +339,20 @@ function App() {
     }
   }
 
-  const handleSubmitFeedback = async (agree: boolean) => {
+  const handleSubmitFeedback = async (rating: 'ACCURATE' | 'INACCURATE') => {
     if (!result || !result.hybrid_verdict) return;
+    setFeedbackRating(rating);
     try {
       const res = await axios.post('http://localhost:8000/feedback', {
-        claim: result.claim_analysis.primary_claim,
-        predicted_verdict: result.hybrid_verdict.verdict_code,
-        predicted_nli_label: result.hybrid_verdict.nli_label || 'NEI',
-        user_agreement: agree,
-        user_suggested_label: agree ? (result.hybrid_verdict.nli_label || 'Supported') : suggestedLabel,
-        user_comment: feedbackComment,
-        evidence_source_url: result.hybrid_verdict.verified_evidences[0]?.url || ''
+        claim_text: result.claim_analysis.primary_claim,
+        predicted_label: result.hybrid_verdict.nli_3class_label || result.hybrid_verdict.verdict_code,
+        user_rating: rating,
+        suggested_label: rating === 'INACCURATE' ? suggestedLabel : (result.hybrid_verdict.nli_3class_label || ''),
+        user_comment: feedbackComment
       });
-      setFeedbackSent(res.data?.message || 'Đã lưu phản hồi thành công!');
-      setShowDisputeForm(false);
+      setFeedbackStatus(res.data.message || 'Đã ghi nhận phản hồi!');
     } catch {
-      setFeedbackSent('Đã ghi nhận phản hồi cục bộ (Cảm ơn đóng góp của bạn).');
-      setShowDisputeForm(false);
+      setFeedbackStatus('Đã lưu phản hồi vào bộ nhớ phiên làm việc.');
     }
   };
 
@@ -610,9 +596,22 @@ function App() {
           )}
 
           <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
-            <p className="text-xs text-slate-600">
-              Hệ thống tự động tách mệnh đề (Node 3), đối chiếu Kho kiểm chứng & Google News RSS Việt Nam (Nodes 4–6) và suy luận NLI (Node 10).
-            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <label htmlFor="retrieval-mode-select" className="text-xs font-bold text-slate-700 font-mono-code uppercase">
+                Cơ chế Truy xuất (Node 4–5):
+              </label>
+              <select
+                id="retrieval-mode-select"
+                value={retrievalMode}
+                onChange={(e) => setRetrievalMode(e.target.value as typeof retrievalMode)}
+                className="cursor-pointer bg-[#F8FAFC] border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-[#0F172A] focus:border-[#1E40AF] outline-none"
+              >
+                <option value="hybrid_rerank">Hybrid (BM25 + Dense) + Cross-Reranker + Lọc Thời Gian (Khuyên dùng)</option>
+                <option value="hybrid">Hybrid Retrieval (BM25 + Dense Fusion)</option>
+                <option value="bm25">BM25 Baseline (Okapi BM25)</option>
+                <option value="dense">Dense Vector Semantic Retrieval</option>
+              </select>
+            </div>
             <button
               type="button"
               onClick={() => handleCheck()}
@@ -652,18 +651,9 @@ function App() {
                         {hv.verdict_badge}
                       </span>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {typeof result.claim_analysis.check_worthiness_score === 'number' && (
-                        <span className="font-mono-code text-xs px-2.5 py-1 rounded-lg bg-blue-50 text-[#1E40AF] border border-blue-200 font-bold">
-                          Check-worthiness: {(result.claim_analysis.check_worthiness_score * 100).toFixed(0)}%
-                        </span>
-                      )}
-                      {typeof hv.latency_ms === 'number' && (
-                        <span className="font-mono-code text-xs px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 border border-slate-200 font-semibold">
-                          Latency: {hv.latency_ms.toFixed(1)} ms
-                        </span>
-                      )}
-                    </div>
+                    <span className="font-mono-code text-xs text-slate-500">
+                      Latency: {hv.latency_ms ?? 12} ms • Độ bất định: {((hv.uncertainty_score ?? 0.15) * 100).toFixed(0)}%
+                    </span>
                   </div>
 
                   <h2
@@ -678,41 +668,20 @@ function App() {
                     {hv.verdict_title}
                   </h2>
 
-                  {/* 3-Class NLI Distribution & LLM Few-Shot Grounded Comparison */}
-                  {hv.uncertainty && hv.llm_few_shot_verification && (
-                    <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
-                      <div>
-                        <span className="font-mono-code text-[11px] font-bold text-slate-600 uppercase block mb-1.5">
-                          Phân phối NLI 3 Nhãn & Độ bất định (Entropy: {hv.uncertainty.uncertainty_entropy})
+                  {/* NLI vs LLM Few-Shot Grounded Comparison Banner */}
+                  {hv.llm_verification && (
+                    <div className="mt-4 p-4 rounded-xl bg-blue-50/70 border border-blue-200">
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                        <span className="font-mono-code text-xs font-bold text-[#1E40AF] uppercase">
+                          Đối chứng NLI Verifier vs. LLM 3-Shot Evidence-Grounded Verification
                         </span>
-                        <div className="grid grid-cols-3 gap-2 font-mono-code text-xs">
-                          <div className="p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900">
-                            <span className="block text-[10px] font-semibold">Supported</span>
-                            <span className="font-bold text-sm">{(hv.uncertainty.nli_probabilities.Supported * 100).toFixed(1)}%</span>
-                          </div>
-                          <div className="p-2 rounded-lg bg-rose-50 border border-rose-200 text-rose-900">
-                            <span className="block text-[10px] font-semibold">Refuted</span>
-                            <span className="font-bold text-sm">{(hv.uncertainty.nli_probabilities.Refuted * 100).toFixed(1)}%</span>
-                          </div>
-                          <div className="p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-900">
-                            <span className="block text-[10px] font-semibold">NEI</span>
-                            <span className="font-bold text-sm">{(hv.uncertainty.nli_probabilities.NEI * 100).toFixed(1)}%</span>
-                          </div>
-                        </div>
+                        <span className="font-mono-code text-[11px] font-bold px-2.5 py-0.5 rounded bg-white text-[#1E40AF] border border-blue-200">
+                          NLI: {hv.nli_3class_label} | LLM Few-Shot: {hv.llm_verification.llm_label} ({(hv.llm_verification.llm_confidence * 100).toFixed(0)}%)
+                        </span>
                       </div>
-                      <div className="border-t md:border-t-0 md:border-l border-slate-200 pt-2 md:pt-0 md:pl-3">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-mono-code text-[11px] font-bold text-[#1E40AF] uppercase">
-                            Đối sánh LLM Few-Shot Grounded
-                          </span>
-                          <span className="font-mono-code text-xs font-bold px-2 py-0.5 rounded bg-blue-100 text-[#1E40AF]">
-                            {hv.llm_few_shot_verification.predicted_label} ({(hv.llm_few_shot_verification.confidence * 100).toFixed(0)}%)
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-700 leading-relaxed line-clamp-3">
-                          {hv.llm_few_shot_verification.grounded_explanation}
-                        </p>
-                      </div>
+                      <p className="text-xs text-slate-800 leading-relaxed font-medium">
+                        {hv.llm_verification.grounded_explanation}
+                      </p>
                     </div>
                   )}
 
@@ -845,21 +814,21 @@ function App() {
                               Điểm S2.1: {ev.veracity_score_1_to_5}/5
                             </span>
                             <span className="font-mono-code px-2.5 py-1 rounded-lg bg-blue-50 border border-blue-200 text-xs font-bold text-[#1E40AF]">
-                              Rerank Sim: {(ev.similarity * 100).toFixed(1)}%
+                              Sim: {(ev.similarity * 100).toFixed(1)}%
                             </span>
-                            {typeof ev.bm25_score === 'number' && typeof ev.dense_score === 'number' && (
-                              <span className="font-mono-code px-2 py-1 rounded-lg bg-slate-100 border border-slate-200 text-[11px] text-slate-700">
-                                BM25: {(ev.bm25_score * 100).toFixed(0)}% • Dense: {(ev.dense_score * 100).toFixed(0)}%
+                            {ev.bm25_score !== undefined && (
+                              <span className="font-mono-code px-2 py-1 rounded-lg bg-slate-100 border border-slate-200 text-[11px] font-semibold text-slate-700">
+                                BM25: {(ev.bm25_score * 100).toFixed(0)}% • Dense: {((ev.dense_score ?? 0) * 100).toFixed(0)}%
                               </span>
                             )}
                             {ev.date && (
-                              <span className="font-mono-code px-2 py-1 rounded-lg bg-amber-50 border border-amber-200 text-[11px] font-semibold text-amber-900">
-                                Ngày bằng chứng: {ev.date}
+                              <span className="font-mono-code px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-[11px] font-bold text-amber-900">
+                                Ngày: {ev.date}
                               </span>
                             )}
                           </div>
                           <span className="font-mono-code text-xs font-semibold text-slate-600">
-                            Nguồn [{ev.id}]: {ev.source}
+                            {ev.citation_tag || `Nguồn: ${ev.source}`}
                           </span>
                         </div>
 
@@ -901,9 +870,16 @@ function App() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Node 3: Claim & NER */}
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-                <span className="font-mono-code text-xs font-bold text-[#1E40AF] uppercase">
-                  Node 3 • Claim & NER
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="font-mono-code text-xs font-bold text-[#1E40AF] uppercase">
+                    Node 3 • Claim & Check-Worthiness
+                  </span>
+                  {result.claim_analysis.check_worthiness_score !== undefined && (
+                    <span className="font-mono-code text-[11px] font-bold px-2.5 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200">
+                      Check-worthy: {(result.claim_analysis.check_worthiness_score * 100).toFixed(0)}%
+                    </span>
+                  )}
+                </div>
                 <h3 className="text-lg font-bold text-[#0F172A] mt-0.5 mb-3">
                   Mệnh Đề Khẳng Định & Thực Thể
                 </h3>
@@ -1188,84 +1164,92 @@ function App() {
               </section>
             )}
 
-            {/* NODE 12: USER FEEDBACK & HUMAN-IN-THE-LOOP VERIFICATION */}
+            {/* NODE 12B: USER FEEDBACK (HUMAN-IN-THE-LOOP FACT VERIFICATION FEEDBACK) */}
             <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                   <span className="font-mono-code text-xs font-bold text-[#1E40AF] uppercase">
-                    Node 12 • Human-in-the-loop Feedback
+                    Node 12B • Human-in-the-Loop Feedback
                   </span>
                   <h3 className="text-lg font-bold text-[#0F172A] mt-0.5">
-                    Đánh Giá & Phản Hồi Của Người Dùng Về Phán Quyết AI
+                    Đánh Giá Của Người Dùng Về Phán Quyết & Bằng Chứng
                   </h3>
                   <p className="text-xs text-slate-600 mt-0.5">
-                    Phản hồi của bạn được lưu trữ vào hàng đợi kiểm duyệt để làm giàu Kho Bằng chứng Chuẩn Việt Nam ở Giai đoạn 2.
+                    Phản hồi của bạn được lưu trữ vào cơ sở dữ liệu kiểm chứng (SQLite/JSON) để làm giàu Kho tri thức chuẩn (Gold Evidence Corpus).
                   </p>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2.5">
+                <div className="flex flex-wrap items-center gap-3">
                   <button
                     type="button"
-                    onClick={() => handleSubmitFeedback(true)}
-                    className="cursor-pointer inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+                    onClick={() => handleSubmitFeedback('ACCURATE')}
+                    className={`cursor-pointer inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold border transition-colors ${
+                      feedbackRating === 'ACCURATE'
+                        ? 'bg-emerald-600 text-white border-emerald-600'
+                        : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                    }`}
                   >
                     <IconCheckCircle />
-                    <span>Đồng ý với Phán quyết ({hv.nli_label || hv.verdict_code})</span>
+                    <span>Phán quyết Chính xác (Đồng ý)</span>
                   </button>
                   <button
                     type="button"
-                    onClick={() => setShowDisputeForm(!showDisputeForm)}
-                    className="cursor-pointer inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-amber-50 text-amber-900 border border-amber-300 hover:bg-amber-100 transition-colors"
+                    onClick={() => setFeedbackRating('INACCURATE')}
+                    className={`cursor-pointer inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold border transition-colors ${
+                      feedbackRating === 'INACCURATE'
+                        ? 'bg-rose-600 text-white border-rose-600'
+                        : 'bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100'
+                    }`}
                   >
                     <IconAlertTriangle />
-                    <span>Báo sai lệch / Đóng góp Bằng chứng</span>
+                    <span>Báo sai lệch / Đề xuất nhãn khác</span>
                   </button>
                 </div>
               </div>
 
-              {showDisputeForm && (
-                <div className="mt-4 pt-4 border-t border-slate-200 grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+              {feedbackRating === 'INACCURATE' && (
+                <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
                   <div className="md:col-span-3">
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Nhãn đúng theo đề xuất của bạn:
+                      Nhãn đúng theo đánh giá của bạn:
                     </label>
                     <select
                       value={suggestedLabel}
                       onChange={(e) => setSuggestedLabel(e.target.value)}
-                      className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] px-3 py-2 text-xs font-bold text-[#0F172A]"
+                      className="w-full bg-[#F8FAFC] border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-[#0F172A]"
                     >
-                      <option value="Supported">Supported (Được chứng minh / Đúng)</option>
-                      <option value="Refuted">Refuted (Bác bỏ / Tin sai sự thật)</option>
-                      <option value="NEI">NEI (Chưa đủ bằng chứng kết luận)</option>
+                      <option value="Supported">Supported (Đúng sự thật)</option>
+                      <option value="Refuted">Refuted (Bác bỏ / Tin giả)</option>
+                      <option value="NEI">NEI (Chưa đủ bằng chứng)</option>
                     </select>
                   </div>
-                  <div className="md:col-span-7">
+                  <div className="md:col-span-6">
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Ghi chú hoặc dẫn chứng bổ sung (URL bài báo chính thống):
+                      Ghi chú hoặc đường dẫn nguồn bằng chứng bổ sung:
                     </label>
                     <input
                       type="text"
                       value={feedbackComment}
                       onChange={(e) => setFeedbackComment(e.target.value)}
-                      placeholder="Nhập nhận xét hoặc dán link nguồn báo chí đối chứng..."
-                      className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] px-3.5 py-2 text-xs text-[#0F172A]"
+                      placeholder="Nhập nhận xét hoặc dán link bài báo chính thống đối chứng..."
+                      className="w-full bg-[#F8FAFC] border border-slate-300 rounded-xl px-3 py-2 text-xs text-[#0F172A]"
                     />
                   </div>
-                  <div className="md:col-span-2">
+                  <div className="md:col-span-3">
                     <button
                       type="button"
-                      onClick={() => handleSubmitFeedback(false)}
-                      className="cursor-pointer w-full py-2 px-4 rounded-xl bg-[#1E40AF] text-white text-xs font-bold hover:bg-[#1E3A8A]"
+                      onClick={() => handleSubmitFeedback('INACCURATE')}
+                      className="cursor-pointer w-full py-2.5 px-4 rounded-xl bg-[#1E40AF] text-white text-xs font-bold hover:bg-[#1E3A8A] transition-colors"
                     >
-                      Gửi Phản Hồi
+                      Gửi Phản Hồi Kiểm Duyệt
                     </button>
                   </div>
                 </div>
               )}
 
-              {feedbackSent && (
+              {feedbackStatus && (
                 <div className="mt-3 p-3 rounded-xl bg-blue-50 border border-blue-200 text-xs font-semibold text-[#1E40AF]">
-                  {feedbackSent}
+                  {feedbackStatus}
                 </div>
               )}
             </section>

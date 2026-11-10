@@ -1,0 +1,269 @@
+{
+  "protocol": {
+    "name": "Strict Leakage-free Evaluation",
+    "index_fields": [
+      "title",
+      "gold_evidence"
+    ],
+    "labels_hidden_from_verifier": true,
+    "historical_reintel_in_corpus": false,
+    "eval_claims_found_verbatim_in_corpus": 0,
+    "corpus_size": 360,
+    "total_claims": 360,
+    "label_distribution": {
+      "Refuted": 120,
+      "Supported": 120,
+      "NEI": 120
+    },
+    "template_generated_claims": 345,
+    "distinct_templates": 18
+  },
+  "retrieval_comparison": {
+    "bm25": {
+      "recall_at_1": 0.7917,
+      "recall_at_3": 0.9111,
+      "recall_at_5": 0.9722,
+      "mrr_at_5": 0.8578,
+      "ndcg_at_5": 0.8863,
+      "top1_wrong_but_same_topic": 0.2083,
+      "avg_latency_ms": 4.0
+    },
+    "dense": {
+      "recall_at_1": 0.7917,
+      "recall_at_3": 0.8972,
+      "recall_at_5": 0.9556,
+      "mrr_at_5": 0.8511,
+      "ndcg_at_5": 0.8771,
+      "top1_wrong_but_same_topic": 0.2083,
+      "avg_latency_ms": 4.22
+    },
+    "hybrid": {
+      "recall_at_1": 0.8028,
+      "recall_at_3": 0.9083,
+      "recall_at_5": 0.9722,
+      "mrr_at_5": 0.8627,
+      "ndcg_at_5": 0.8899,
+      "top1_wrong_but_same_topic": 0.1972,
+      "avg_latency_ms": 4.02
+    },
+    "hybrid_rerank": {
+      "recall_at_1": 0.8917,
+      "recall_at_3": 0.9694,
+      "recall_at_5": 0.9889,
+      "mrr_at_5": 0.9299,
+      "ndcg_at_5": 0.9447,
+      "top1_wrong_but_same_topic": 0.1083,
+      "avg_latency_ms": 6.0
+    }
+  },
+  "verification_pipeline": {
+    "nli": {
+      "macro_f1": 0.8272,
+      "accuracy": 0.8306,
+      "precision": 0.8565,
+      "recall": 0.8306,
+      "f1_per_class": {
+        "Supported": 0.8285,
+        "Refuted": 0.8571,
+        "NEI": 0.796
+      },
+      "confusion_matrix": [
+        [
+          99,
+          20,
+          1
+        ],
+        [
+          0,
+          120,
+          0
+        ],
+        [
+          20,
+          20,
+          80
+        ]
+      ],
+      "labels_order": [
+        "Supported",
+        "Refuted",
+        "NEI"
+      ]
+    },
+    "llm": {
+      "macro_f1": 0.8272,
+      "accuracy": 0.8306,
+      "precision": 0.8565,
+      "recall": 0.8306,
+      "f1_per_class": {
+        "Supported": 0.8285,
+        "Refuted": 0.8571,
+        "NEI": 0.796
+      },
+      "confusion_matrix": [
+        [
+          99,
+          20,
+          1
+        ],
+        [
+          0,
+          120,
+          0
+        ],
+        [
+          20,
+          20,
+          80
+        ]
+      ],
+      "labels_order": [
+        "Supported",
+        "Refuted",
+        "NEI"
+      ]
+    },
+    "hybrid": {
+      "macro_f1": 0.8272,
+      "accuracy": 0.8306,
+      "precision": 0.8565,
+      "recall": 0.8306,
+      "f1_per_class": {
+        "Supported": 0.8285,
+        "Refuted": 0.8571,
+        "NEI": 0.796
+      },
+      "confusion_matrix": [
+        [
+          99,
+          20,
+          1
+        ],
+        [
+          0,
+          120,
+          0
+        ],
+        [
+          20,
+          20,
+          80
+        ]
+      ],
+      "labels_order": [
+        "Supported",
+        "Refuted",
+        "NEI"
+      ]
+    }
+  },
+  "verification_oracle_evidence": {
+    "nli": {
+      "macro_f1": 0.8272,
+      "accuracy": 0.8306,
+      "precision": 0.8565,
+      "recall": 0.8306,
+      "f1_per_class": {
+        "Supported": 0.8285,
+        "Refuted": 0.8571,
+        "NEI": 0.796
+      },
+      "confusion_matrix": [
+        [
+          99,
+          20,
+          1
+        ],
+        [
+          0,
+          120,
+          0
+        ],
+        [
+          20,
+          20,
+          80
+        ]
+      ],
+      "labels_order": [
+        "Supported",
+        "Refuted",
+        "NEI"
+      ]
+    },
+    "llm": {
+      "macro_f1": 0.8272,
+      "accuracy": 0.8306,
+      "precision": 0.8565,
+      "recall": 0.8306,
+      "f1_per_class": {
+        "Supported": 0.8285,
+        "Refuted": 0.8571,
+        "NEI": 0.796
+      },
+      "confusion_matrix": [
+        [
+          99,
+          20,
+          1
+        ],
+        [
+          0,
+          120,
+          0
+        ],
+        [
+          20,
+          20,
+          80
+        ]
+      ],
+      "labels_order": [
+        "Supported",
+        "Refuted",
+        "NEI"
+      ]
+    },
+    "hybrid": {
+      "macro_f1": 0.8272,
+      "accuracy": 0.8306,
+      "precision": 0.8565,
+      "recall": 0.8306,
+      "f1_per_class": {
+        "Supported": 0.8285,
+        "Refuted": 0.8571,
+        "NEI": 0.796
+      },
+      "confusion_matrix": [
+        [
+          99,
+          20,
+          1
+        ],
+        [
+          0,
+          120,
+          0
+        ],
+        [
+          20,
+          20,
+          80
+        ]
+      ],
+      "labels_order": [
+        "Supported",
+        "Refuted",
+        "NEI"
+      ]
+    }
+  },
+  "summary": {
+    "retrieval_recall_at_5": 0.9889,
+    "retrieval_mrr_at_5": 0.9299,
+    "verification_macro_f1": 0.8272,
+    "citation_accuracy_strict": 0.8917,
+    "end_to_end_evidence_grounded_accuracy": 0.8028,
+    "avg_latency_ms": 5.89
+  }
+}

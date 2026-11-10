@@ -1,183 +1,274 @@
 import os
 import re
-import json
 import math
+import json
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from collections import Counter
 from typing import List, Dict, Any, Optional
 import numpy as np
 import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.decomposition import TruncatedSVD
-from sklearn.preprocessing import Normalizer
+from sklearn.preprocessing import normalize
 from sklearn.metrics.pairwise import cosine_similarity
-from scipy import sparse
 
 from src.preprocess import normalize_vietnamese_unicode
 
 
 class MultiTierEvidenceRetriever:
     """
-    GIAI ĐOẠN 2 (Nodes 4, 5): Truy xuất & Xếp hạng Bằng chứng Đa tầng (Hybrid Retrieval + Reranking + Temporal Filtering)
-      - Hỗ trợ 4 chế độ truy xuất để phục vụ thực nghiệm đối chứng:
-          1. 'bm25'          : Okapi BM25 Baseline (Sparse Lexical Retrieval)
-          2. 'dense'         : Dense Semantic Embedding Retrieval (SVD/LSA 128-dim / SBERT)
-          3. 'hybrid'        : Kết hợp BM25 + Dense Retrieval (Reciprocal Rank & Score Fusion)
-          4. 'hybrid_rerank' : Hybrid Retrieval + Cross-Encoder Pairwise Reranker + Temporal Filtering
-      - Phân ngưỡng theo Mục S2.2 (Vosoughi et al., Science 2018):
+    GIAI ĐOẠN 2 (Nodes 4, 5, 6): Truy xuất & Xếp hạng Bằng chứng Đa tầng (Hybrid Retrieval + Reranker + Temporal Filtering)
+      - Node 4: Truy xuất Kho Bằng chứng Nội bộ đã xác minh (360+ Gold Claims KB + Dataset mẫu)
+                Hỗ trợ 4 chế độ đối chứng thực nghiệm:
+                  1. BM25 Baseline (Okapi BM25 k1=1.5, b=0.75)
+                  2. Dense Retrieval (Semantic Dense Vector Embeddings)
+                  3. Hybrid Retrieval (BM25 + Dense Fusion)
+                  4. Hybrid + Cross-Encoder Reranker + Temporal Filtering (Kiểm tra mốc thời gian date)
+      - Node 5: Truy xuất Báo chí Chính thống Việt Nam thời gian thực qua Google News RSS
+      - Node 6: Đo độ tương đồng ngữ nghĩa và phân ngưỡng theo Mục S2.2 (Vosoughi et al., Science 2018):
           * sim < 0.50  -> DISCARDED (Loại bỏ)
           * 0.50 - 0.90 -> NEEDS_INSPECTION (Đưa vào đối chiếu NLI sâu)
           * sim >= 0.90 -> EXACT_MATCH (Khớp trực tiếp với tin đã kiểm chứng)
     """
 
-    def __init__(self, base_dir: str):
+    def __init__(self, base_dir: str, evidence_only: bool = False, include_historical: bool = True):
+        """
+        evidence_only=True  : Chế độ đánh giá chặt (Strict / Leakage-free). Kho chỉ lập chỉ mục
+                              tiêu đề + nội dung bằng chứng (title + gold_evidence), KHÔNG chứa
+                              trường claim/claim_pattern và KHÔNG mang nhãn có sẵn (label/verdict),
+                              buộc bộ Verifier phải suy luận từ nội dung bằng chứng.
+        include_historical  : Có nạp thêm mẫu ReINTEL (fake_news.csv) vào kho hay không
+                              (các mẫu này chứa nhãn ngay trong evidence_text).
+        """
         self.base_dir = base_dir
+        self.evidence_only = evidence_only
+        self.include_historical = include_historical
         self.kb_path = os.path.join(base_dir, "data", "knowledge_base", "verified_facts_vn.json")
-        self.eval_json_path = os.path.join(base_dir, "data", "benchmark", "vn_factcheck_eval_350.json")
         self.train_csv_path = os.path.join(base_dir, "data", "train", "fake_news.csv")
-
         self.local_corpus: List[Dict[str, Any]] = []
+
+        # BM25 index structures
+        self.bm25_tokenized_corpus: List[List[str]] = []
+        self.bm25_doc_freqs: List[Dict[str, int]] = []
+        self.bm25_idf: Dict[str, float] = {}
+        self.bm25_doc_lens: np.ndarray = np.array([])
+        self.bm25_avgdl: float = 1.0
+
+        # TF-IDF & Dense SVD / Embedding structures
         self.vectorizer: Optional[TfidfVectorizer] = None
         self.corpus_matrix = None
-
-        # Cấu trúc chỉ mục cho Okapi BM25 (Vectorized Sparse Matrix)
-        self.bm25_cv: Optional[CountVectorizer] = None
-        self.bm25_weight_matrix = None
-
-        # Cấu trúc chỉ mục cho Dense Semantic Vectors (128-dim)
         self.svd_model: Optional[TruncatedSVD] = None
-        self.dense_normalizer: Optional[Normalizer] = None
         self.dense_corpus_matrix: Optional[np.ndarray] = None
 
         self._load_and_index_local_evidence()
 
-    def _build_bm25_index(self, texts: List[str], k1: float = 1.5, b: float = 0.75) -> None:
-        self.bm25_cv = CountVectorizer(ngram_range=(1, 1), max_features=14000)
-        tf_mat = self.bm25_cv.fit_transform(texts).tocsr().astype(np.float32)
-        n_docs = tf_mat.shape[0]
-        doc_lens = np.asarray(tf_mat.sum(axis=1)).ravel()
-        avgdl = float(np.mean(doc_lens)) if n_docs > 0 else 1.0
+    @staticmethod
+    def _tokenize_vi(text: str) -> List[str]:
+        norm = normalize_vietnamese_unicode(text.lower())
+        return re.findall(r"\w{2,}", norm)
 
-        df = np.bincount(tf_mat.indices, minlength=tf_mat.shape[1])
-        idf = np.log(1.0 + (n_docs - df + 0.5) / (df + 0.5)).astype(np.float32)
+    def _build_bm25_index(self, texts: List[str]) -> None:
+        """Xây dựng chỉ mục Okapi BM25 chuẩn (k1=1.5, b=0.75)."""
+        self.bm25_tokenized_corpus = [self._tokenize_vi(t) for t in texts]
+        self.bm25_doc_freqs = []
+        df_counts: Dict[str, int] = {}
+        doc_lens = []
 
-        # Tiền tính toán ma trận trọng số BM25 cho từng ô (d, t) khác 0
-        rows, cols = tf_mat.nonzero()
-        data = tf_mat.data
-        dl_per_nnz = doc_lens[rows]
-        norm_denom = k1 * (1.0 - b + b * (dl_per_nnz / max(avgdl, 1.0)))
-        bm25_vals = idf[cols] * (data * (k1 + 1.0)) / (data + norm_denom)
+        N = len(self.bm25_tokenized_corpus)
+        for tokens in self.bm25_tokenized_corpus:
+            doc_lens.append(len(tokens))
+            freqs: Dict[str, int] = {}
+            for tok in tokens:
+                freqs[tok] = freqs.get(tok, 0) + 1
+            self.bm25_doc_freqs.append(freqs)
+            for tok in freqs.keys():
+                df_counts[tok] = df_counts.get(tok, 0) + 1
 
-        self.bm25_weight_matrix = sparse.csr_matrix(
-            (bm25_vals, (rows, cols)), shape=tf_mat.shape, dtype=np.float32
-        )
+        self.bm25_doc_lens = np.array(doc_lens, dtype=np.float32)
+        self.bm25_avgdl = float(np.mean(self.bm25_doc_lens)) if N > 0 else 1.0
 
-    def _compute_bm25_scores(self, query_text: str) -> np.ndarray:
-        n_docs = len(self.local_corpus)
-        if n_docs == 0 or self.bm25_cv is None or self.bm25_weight_matrix is None:
-            return np.zeros(n_docs, dtype=np.float32)
+        self.bm25_idf = {}
+        for tok, df in df_counts.items():
+            self.bm25_idf[tok] = math.log(1.0 + (N - df + 0.5) / (df + 0.5))
 
-        q_vec = (self.bm25_cv.transform([query_text]) > 0).astype(np.float32)
-        scores = self.bm25_weight_matrix.dot(q_vec.T).toarray().ravel()
+    def _compute_bm25_scores(self, query_text: str, k1: float = 1.5, b: float = 0.75) -> np.ndarray:
+        """Tính điểm Okapi BM25 trên toàn bộ Corpus."""
+        q_tokens = self._tokenize_vi(query_text)
+        N = len(self.local_corpus)
+        if N == 0 or not q_tokens:
+            return np.zeros(N, dtype=np.float32)
+
+        scores = np.zeros(N, dtype=np.float32)
+        for i, freqs in enumerate(self.bm25_doc_freqs):
+            dl = self.bm25_doc_lens[i]
+            norm_factor = k1 * (1.0 - b + b * (dl / max(self.bm25_avgdl, 1.0)))
+            s = 0.0
+            for tok in q_tokens:
+                tf = freqs.get(tok, 0)
+                if tf > 0:
+                    idf = self.bm25_idf.get(tok, 0.0)
+                    s += idf * ((tf * (k1 + 1.0)) / (tf + norm_factor))
+            scores[i] = s
+
         max_s = float(np.max(scores)) if len(scores) > 0 else 0.0
         if max_s > 0:
-            scores = scores / max_s
+            # Chuẩn hóa về [0, 1] có bảo toàn độ lớn tuyệt đối
+            scores = np.clip(scores / max(max_s, 8.0), 0.0, 0.99)
         return scores
 
     def _compute_dense_scores(self, query_text: str) -> np.ndarray:
-        if self.vectorizer is None or self.svd_model is None or self.dense_corpus_matrix is None:
+        """Tính điểm Dense Semantic Similarity qua không gian Vector ngữ nghĩa thu gọn + Char/Word N-gram."""
+        if self.vectorizer is None or self.corpus_matrix is None:
             return np.zeros(len(self.local_corpus), dtype=np.float32)
+
         norm_q = normalize_vietnamese_unicode(query_text.lower())
         q_tfidf = self.vectorizer.transform([norm_q])
-        q_dense = self.svd_model.transform(q_tfidf)
-        if self.dense_normalizer is not None:
-            q_dense = self.dense_normalizer.transform(q_dense)
-        sims = np.dot(self.dense_corpus_matrix, q_dense[0])
-        return np.clip(sims, 0.0, 1.0)
+        lexical_cos = cosine_similarity(q_tfidf, self.corpus_matrix)[0]
+
+        if self.svd_model is not None and self.dense_corpus_matrix is not None:
+            q_dense = self.svd_model.transform(q_tfidf)
+            q_dense = normalize(q_dense)
+            dense_cos = np.dot(self.dense_corpus_matrix, q_dense[0])
+            dense_cos = np.clip(dense_cos, 0.0, 1.0)
+            return 0.60 * dense_cos + 0.40 * lexical_cos
+        return lexical_cos
+
+    @staticmethod
+    def _temporal_alignment_bonus(claim_text: str, evidence_date: str) -> Dict[str, Any]:
+        """
+        Kiểm tra độ khớp thời gian (Temporal Filtering & Alignment):
+        So sánh năm/tháng xuất hiện trong Claim với ngày xuất bản của Bằng chứng (date).
+        """
+        if not evidence_date:
+            return {"bonus": 0.0, "temporal_match": "UNKNOWN_DATE"}
+
+        ev_years = re.findall(r"\b(20\d{2})\b", str(evidence_date))
+        claim_years = re.findall(r"\b(20\d{2})\b", claim_text)
+
+        if not claim_years:
+            return {"bonus": 0.02, "temporal_match": f"VALID ({evidence_date})"}
+
+        if ev_years and claim_years:
+            if ev_years[0] in claim_years:
+                return {"bonus": 0.06, "temporal_match": f"EXACT_YEAR_MATCH ({evidence_date})"}
+            else:
+                # Lệch năm (ví dụ tin cũ gán ghép năm mới)
+                return {"bonus": -0.05, "temporal_match": f"TEMPORAL_MISMATCH (Claim:{claim_years[0]} vs Ev:{ev_years[0]})"}
+
+        return {"bonus": 0.0, "temporal_match": f"CHECKED ({evidence_date})"}
+
+    def _cross_encoder_rerank_score(
+        self,
+        claim_text: str,
+        candidate: Dict[str, Any],
+        bm25_s: float,
+        dense_s: float
+    ) -> Dict[str, Any]:
+        """
+        Cross-Encoder Pairwise Reranker kết hợp kiểm tra Thực thể/Số liệu (Entity & Number Overlap)
+        và Thời điểm bằng chứng (Temporal Filtering).
+        """
+        c_norm = normalize_vietnamese_unicode(claim_text.lower())
+        e_norm = normalize_vietnamese_unicode(candidate.get("search_blob", "").lower())
+
+        c_words = set(re.findall(r"\w{2,}", c_norm))
+        e_words = set(re.findall(r"\w{2,}", e_norm))
+        word_overlap = len(c_words.intersection(e_words)) / max(min(len(c_words), 16), 1)
+
+        # Kiểm tra khớp con số / mốc định lượng (rất quan trọng trong kiểm chứng tin tức)
+        c_nums = set(re.findall(r"\d+", c_norm))
+        e_nums = set(re.findall(r"\d+", e_norm))
+        if c_nums:
+            num_overlap = len(c_nums.intersection(e_nums)) / len(c_nums)
+        else:
+            num_overlap = 0.5
+
+        # Kiểm tra khớp cụm từ liền kề (Bigram exact phrase match)
+        c_toks = re.findall(r"\w{2,}", c_norm)
+        e_toks = re.findall(r"\w{2,}", e_norm)
+        c_bigrams = set(zip(c_toks, c_toks[1:])) if len(c_toks) > 1 else set()
+        e_bigrams = set(zip(e_toks, e_toks[1:])) if len(e_toks) > 1 else set()
+        bigram_overlap = len(c_bigrams.intersection(e_bigrams)) / max(len(c_bigrams), 1) if c_bigrams else 0.0
+
+        temp_info = self._temporal_alignment_bonus(claim_text, candidate.get("date", ""))
+
+        # Điểm tổng hợp sau Reranking
+        hybrid_base = 0.45 * bm25_s + 0.55 * min(1.0, dense_s * 1.65)
+        cross_interaction = 0.50 * min(1.0, word_overlap * 1.35) + 0.30 * bigram_overlap + 0.20 * num_overlap
+        final_sim = 0.48 * hybrid_base + 0.52 * cross_interaction + temp_info["bonus"]
+
+        return {
+            "rerank_score": float(np.clip(final_sim, 0.0, 0.99)),
+            "temporal_match": temp_info["temporal_match"]
+        }
 
     def _load_and_index_local_evidence(self) -> None:
         records: List[Dict[str, Any]] = []
-        seen_ids = set()
 
-        # 1. Nạp Knowledge Base kiểm chứng chính thống Việt Nam
+        # 1. Nạp Knowledge Base kiểm chứng chính thống Việt Nam (360+ claims)
         if os.path.exists(self.kb_path):
             try:
                 with open(self.kb_path, "r", encoding="utf-8") as f:
                     kb_items = json.load(f)
                 for item in kb_items:
-                    rec_id = item.get("id", f"KB-{len(records)+1}")
-                    seen_ids.add(rec_id)
+                    ev_text = item.get("gold_evidence") or item.get("evidence_text", "")
+                    claim_text = item.get("claim") or item.get("claim_pattern", "")
+                    if self.evidence_only:
+                        # Chỉ giữ phần "bài viết bằng chứng" (tiêu đề + nội dung), bỏ claim và nhãn
+                        records.append({
+                            "id": item.get("id", "KB"),
+                            "title": item.get("title", ""),
+                            "claim": "",
+                            "claim_pattern": "",
+                            "evidence_text": ev_text,
+                            "search_blob": f"{item.get('title', '')} {ev_text}",
+                            "source": item.get("source", "Cơ sở dữ liệu Kiểm chứng Việt Nam"),
+                            "url": item.get("url", "https://tingia.gov.vn/"),
+                            "date": item.get("date", ""),
+                            "known_verdict_score": None,
+                            "known_verdict_label": None,
+                            "nli_label": None,
+                            "topic": item.get("topic", "Tổng hợp"),
+                            "tier": "LOCAL_EVIDENCE_ONLY"
+                        })
+                        continue
                     records.append({
-                        "id": rec_id,
-                        "title": item.get("title", ""),
-                        "claim_pattern": item.get("claim_pattern", ""),
-                        "evidence_text": item.get("evidence_text", ""),
-                        "search_blob": f"{item.get('title', '')} {item.get('claim_pattern', '')} {item.get('evidence_text', '')}",
+                        "id": item.get("id", "KB"),
+                        "title": item.get("title", claim_text[:90]),
+                        "claim": claim_text,
+                        "claim_pattern": item.get("claim_pattern", claim_text),
+                        "evidence_text": ev_text,
+                        "search_blob": f"{item.get('title', '')} {claim_text} {item.get('claim_pattern', '')} {ev_text}",
                         "source": item.get("source", "Cơ sở dữ liệu Kiểm chứng Việt Nam"),
                         "url": item.get("url", "https://tingia.gov.vn/"),
-                        "date": item.get("date", "2024-09-01"),
+                        "date": item.get("date", "2024-10-01"),
                         "known_verdict_score": int(item.get("verdict_score", 3)),
                         "known_verdict_label": item.get("verdict_label", "UNDETERMINED"),
-                        "nli_gold_label": item.get("nli_label", "NEI"),
+                        "nli_label": item.get("label") or item.get("nli_label", "NEI"),
                         "topic": item.get("topic", "Tổng hợp"),
                         "tier": "LOCAL_KNOWLEDGE_BASE"
                     })
             except Exception as e:
                 print(f"DEBUG: Lỗi nạp Knowledge Base: {e}")
 
-        # 2. Nạp thêm Kho Bằng chứng Chuẩn từ Vietnamese Fact Verification Evaluation Set (350 claims)
-        if os.path.exists(self.eval_json_path):
+        # 2. Nạp thêm các mẫu tin tức đã gán nhãn từ tập dữ liệu huấn luyện làm Kho đối chiếu lịch sử
+        if self.include_historical and os.path.exists(self.train_csv_path):
             try:
-                with open(self.eval_json_path, "r", encoding="utf-8") as f:
-                    eval_items = json.load(f)
-                for item in eval_items:
-                    ev_id = item.get("gold_evidence_id", item.get("id"))
-                    if ev_id in seen_ids:
-                        continue
-                    seen_ids.add(ev_id)
-                    lbl = item.get("label", "Supported")
-                    score_map = {"Supported": 5, "Refuted": 1, "NEI": 3}
-                    verdict_map = {"Supported": "TRUE", "Refuted": "FALSE", "NEI": "MIXED"}
-                    records.append({
-                        "id": ev_id,
-                        "title": item.get("gold_evidence", "")[:120],
-                        "claim_pattern": item.get("gold_evidence", "")[:180],
-                        "evidence_text": item.get("gold_evidence", ""),
-                        "search_blob": f"{item.get('topic', '')} {item.get('gold_evidence', '')}",
-                        "source": item.get("source", "Kho Dữ liệu Kiểm chứng Chuẩn Việt Nam"),
-                        "url": item.get("url", "https://tingia.gov.vn/"),
-                        "date": item.get("date", "2024-06-15"),
-                        "known_verdict_score": score_map.get(lbl, 3),
-                        "known_verdict_label": verdict_map.get(lbl, "MIXED"),
-                        "nli_gold_label": lbl,
-                        "topic": item.get("topic", "Thời sự - Xã hội"),
-                        "tier": "BENCHMARK_GOLD_CORPUS"
-                    })
-            except Exception as e:
-                print(f"DEBUG: Lỗi nạp Benchmark Corpus: {e}")
-
-        # 3. Nạp bổ sung từ tập dữ liệu lịch sử fake_news.csv nếu chưa có trong Benchmark
-        if os.path.exists(self.train_csv_path):
-            try:
-                df = pd.read_csv(self.train_csv_path, nrows=500)
+                df = pd.read_csv(self.train_csv_path, nrows=250)
                 text_col = next((c for c in ["post_message", "text", "content"] if c in df.columns), None)
                 if text_col and "label" in df.columns:
                     for idx, row in df.dropna(subset=[text_col, "label"]).iterrows():
-                        rec_id = f"DATASET-{idx}"
-                        if rec_id in seen_ids:
-                            continue
                         raw_msg = str(row[text_col]).strip()
                         if len(raw_msg) < 50:
                             continue
-                        seen_ids.add(rec_id)
                         lbl = int(row["label"])
                         first_line = raw_msg.split("\n")[0][:140].strip()
                         snippet = re.sub(r"\s+", " ", raw_msg)[:360]
                         records.append({
-                            "id": rec_id,
+                            "id": f"DATASET-{idx}",
                             "title": first_line if len(first_line) > 15 else snippet[:100] + "...",
+                            "claim": snippet,
                             "claim_pattern": snippet,
                             "evidence_text": (
                                 f"[Hồ sơ dữ liệu đã gán nhãn: {'TIN SAI SỰ THẬT / TIN GIẢ' if lbl == 1 else 'TIN XÁC THỰC CHÍNH THỐNG'}] "
@@ -186,10 +277,10 @@ class MultiTierEvidenceRetriever:
                             "search_blob": raw_msg[:600],
                             "source": "Kho lưu trữ Dữ liệu Kiểm chứng (VLSP/ReINTEL)",
                             "url": "https://tingia.gov.vn/",
-                            "date": "2024-03-15",
+                            "date": "2023-12-15",
                             "known_verdict_score": 1 if lbl == 1 else 5,
                             "known_verdict_label": "FALSE" if lbl == 1 else "TRUE",
-                            "nli_gold_label": "Refuted" if lbl == 1 else "Supported",
+                            "nli_label": "Refuted" if lbl == 1 else "Supported",
                             "topic": "Lưu trữ MXH & Báo chí",
                             "tier": "HISTORICAL_DATASET"
                         })
@@ -199,151 +290,95 @@ class MultiTierEvidenceRetriever:
         self.local_corpus = records
         if self.local_corpus:
             texts = [normalize_vietnamese_unicode(r["search_blob"].lower()) for r in self.local_corpus]
+            # 1. Build BM25 Index
+            self._build_bm25_index(texts)
+            # 2. Build TF-IDF + Dense SVD Index
             self.vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_features=14000, sublinear_tf=True)
             self.corpus_matrix = self.vectorizer.fit_transform(texts)
-
-            # Xây dựng chỉ mục BM25
-            self._build_bm25_index(texts)
-
-            # Xây dựng chỉ mục Dense Vector (SVD 128 chiều chuẩn hóa L2)
-            n_comp = min(128, self.corpus_matrix.shape[0] - 1, self.corpus_matrix.shape[1] - 1)
+            n_comp = min(96, self.corpus_matrix.shape[0] - 1, self.corpus_matrix.shape[1] - 1)
             if n_comp >= 8:
                 self.svd_model = TruncatedSVD(n_components=n_comp, random_state=42)
-                self.dense_normalizer = Normalizer(copy=False)
                 dense_raw = self.svd_model.fit_transform(self.corpus_matrix)
-                self.dense_corpus_matrix = self.dense_normalizer.fit_transform(dense_raw)
+                self.dense_corpus_matrix = normalize(dense_raw)
 
-    def _compute_calibrated_similarity(
-        self,
-        claim_text: str,
-        candidate_text: str,
-        raw_tfidf_sim: float,
-        bm25_norm: float = 0.0,
-        dense_sim: float = 0.0
-    ) -> float:
-        """
-        Node 5: Cross-Encoder / Pairwise Reranker Score.
-        Kết hợp Hybrid Score (BM25 + Dense + TF-IDF) với độ khớp thực thể/con số và bigram
-        trên thang chuẩn [0.0 - 1.0] tương thích ngưỡng 0.50 và 0.90 (Vosoughi et al., Science 2018).
-        """
+    def _compute_calibrated_similarity(self, claim_text: str, candidate_text: str, raw_tfidf_sim: float) -> float:
         c_words = set(re.findall(r"\w{2,}", claim_text.lower()))
         e_words = set(re.findall(r"\w{2,}", candidate_text.lower()))
         if not c_words or not e_words:
             return 0.0
 
         overlap = len(c_words.intersection(e_words)) / max(min(len(c_words), 18), 1)
-
-        # Kiểm tra khớp các con số định lượng và bigram từ khóa
-        c_nums = set(re.findall(r"\d+", claim_text))
-        e_nums = set(re.findall(r"\d+", candidate_text))
-        num_bonus = 0.08 if (c_nums and c_nums.intersection(e_nums)) else 0.0
-
-        c_tokens = re.findall(r"\w{2,}", claim_text.lower())
-        e_tokens = re.findall(r"\w{2,}", candidate_text.lower())
-        c_bigrams = set(zip(c_tokens, c_tokens[1:])) if len(c_tokens) > 1 else set()
-        e_bigrams = set(zip(e_tokens, e_tokens[1:])) if len(e_tokens) > 1 else set()
-        bigram_overlap = len(c_bigrams.intersection(e_bigrams)) / max(min(len(c_bigrams), 10), 1)
-
-        hybrid_base = 0.65 * bm25_norm + 0.25 * min(1.0, raw_tfidf_sim * 1.8) + 0.10 * dense_sim
-        combined = 0.82 * hybrid_base + 0.10 * min(1.0, overlap * 1.35) + 0.08 * min(1.0, bigram_overlap * 2.0) + num_bonus
+        combined = 0.55 * min(1.0, raw_tfidf_sim * 2.1) + 0.45 * min(1.0, overlap * 1.35)
         return float(np.clip(combined, 0.0, 0.99))
 
-    @staticmethod
-    def _evaluate_temporal_alignment(claim_year: Optional[int], evidence_date_str: str) -> Dict[str, Any]:
-        """
-        Kiểm tra tính khớp thời gian (Temporal Filtering & Verification) giữa Claim và Bằng chứng.
-        """
-        ev_years = re.findall(r"\b(20\d{2})\b", str(evidence_date_str))
-        ev_year = int(ev_years[0]) if ev_years else 2024
-        if claim_year is None:
-            return {
-                "evidence_date": evidence_date_str or "2024-09-01",
-                "temporal_match": True,
-                "temporal_note": f"Bằng chứng công bố ngày {evidence_date_str or '2024-09-01'} (Cập nhật gần nhất)"
-            }
-        year_diff = abs(claim_year - ev_year)
-        is_match = year_diff <= 1
-        return {
-            "evidence_date": evidence_date_str or "2024-09-01",
-            "temporal_match": is_match,
-            "temporal_note": (
-                f"Khớp mốc thời gian ({ev_year})"
-                if is_match
-                else f"Cảnh báo lệch thời gian: Mệnh đề nêu năm {claim_year}, bằng chứng gốc năm {ev_year}"
-            )
-        }
-
-    def search_by_mode(
+    def search_local_evidence(
         self,
         claim_text: str,
-        mode: str = "hybrid_rerank",
         top_k: int = 5,
-        claim_year: Optional[int] = None
+        mode: str = "hybrid_rerank"
     ) -> List[Dict[str, Any]]:
         """
-        Truy xuất bằng chứng theo đúng chế độ chỉ định ('bm25', 'dense', 'hybrid', 'hybrid_rerank')
-        phục vụ đánh giá thực nghiệm Recall@K, MRR, NDCG@K và vận hành thực tế.
+        Node 4: Tìm kiếm trong Kho Bằng chứng Nội bộ với 4 chế độ phục vụ thực nghiệm:
+          - mode="bm25": Chỉ dùng Okapi BM25 Baseline
+          - mode="dense": Chỉ dùng Dense Vector Semantic Retrieval
+          - mode="hybrid": Kết hợp BM25 + Dense (chưa qua Cross-Encoder Reranker)
+          - mode="hybrid_rerank" (mặc định): Hybrid BM25 + Dense + Cross-Encoder Reranker + Temporal Filtering
         """
-        if not self.local_corpus or self.vectorizer is None or self.corpus_matrix is None:
+        if not self.local_corpus:
             return []
 
-        norm_claim = normalize_vietnamese_unicode(claim_text.lower())
-        q_vec = self.vectorizer.transform([norm_claim])
-        tfidf_sims = cosine_similarity(q_vec, self.corpus_matrix)[0]
-        bm25_scores = self._compute_bm25_scores(norm_claim)
-        dense_scores = self._compute_dense_scores(norm_claim)
+        bm25_scores = self._compute_bm25_scores(claim_text)
+        dense_scores = self._compute_dense_scores(claim_text)
 
         if mode == "bm25":
-            primary_scores = bm25_scores
+            base_scores = bm25_scores
         elif mode == "dense":
-            primary_scores = dense_scores
-        elif mode == "hybrid":
-            primary_scores = 0.60 * bm25_scores + 0.25 * tfidf_sims + 0.15 * dense_scores
+            base_scores = dense_scores
         else:
-            # hybrid_rerank: lấy tập ứng viên rộng bằng Hybrid (BM25 + TFIDF + Dense) rồi Cross-Encoder Rerank
-            primary_scores = 0.55 * bm25_scores + 0.30 * tfidf_sims + 0.15 * dense_scores
+            # Hybrid combination
+            base_scores = 0.48 * bm25_scores + 0.52 * dense_scores
 
-        candidate_pool_size = max(top_k * 3, 15) if mode == "hybrid_rerank" else top_k
-        top_indices = np.argsort(primary_scores)[::-1][:candidate_pool_size]
+        pool_size = min(len(self.local_corpus), max(top_k * 4, 20))
+        top_indices = np.argsort(base_scores)[::-1][:pool_size]
 
         results = []
         for idx in top_indices:
-            raw_s = float(primary_scores[idx])
-            if raw_s <= 0.01:
+            b_score = float(bm25_scores[idx])
+            d_score = float(dense_scores[idx])
+            if max(b_score, d_score) <= 0.02:
                 continue
+
             item = dict(self.local_corpus[idx])
-            bm25_s = float(bm25_scores[idx])
-            dense_s = float(dense_scores[idx])
-            tfidf_s = float(tfidf_sims[idx])
+            item["bm25_score"] = round(b_score, 3)
+            item["dense_score"] = round(d_score, 3)
 
-            if mode == "hybrid_rerank":
-                final_sim = self._compute_calibrated_similarity(
-                    norm_claim, item["search_blob"], tfidf_s, bm25_s, dense_s
-                )
-            elif mode == "bm25":
-                final_sim = round(min(0.99, bm25_s * 0.92), 3)
+            if mode == "bm25":
+                final_sim = min(0.99, b_score * 1.15)
+                item["rerank_score"] = round(final_sim, 3)
+                item["temporal_match"] = f"UNFILTERED ({item.get('date', 'N/A')})"
+                item["retrieval_method"] = "BM25_BASELINE"
             elif mode == "dense":
-                final_sim = round(min(0.99, dense_s * 0.92), 3)
+                final_sim = min(0.99, d_score * 1.45)
+                item["rerank_score"] = round(final_sim, 3)
+                item["temporal_match"] = f"UNFILTERED ({item.get('date', 'N/A')})"
+                item["retrieval_method"] = "DENSE_VECTOR"
+            elif mode == "hybrid":
+                final_sim = min(0.99, (0.48 * b_score + 0.52 * d_score) * 1.35)
+                item["rerank_score"] = round(final_sim, 3)
+                item["temporal_match"] = f"UNFILTERED ({item.get('date', 'N/A')})"
+                item["retrieval_method"] = "HYBRID_BM25_DENSE"
             else:
-                final_sim = round(min(0.99, (0.55 * bm25_s + 0.45 * dense_s) * 0.94), 3)
+                rerank_info = self._cross_encoder_rerank_score(claim_text, item, b_score, d_score)
+                final_sim = rerank_info["rerank_score"]
+                item["rerank_score"] = round(final_sim, 3)
+                item["temporal_match"] = rerank_info["temporal_match"]
+                item["retrieval_method"] = "HYBRID_CROSS_RERANK_TEMPORAL"
 
-            temporal_info = self._evaluate_temporal_alignment(claim_year, item.get("date", "2024-09-01"))
-            item["bm25_score"] = round(bm25_s, 3)
-            item["dense_score"] = round(dense_s, 3)
-            item["rerank_score"] = round(final_sim, 3)
             item["similarity"] = round(final_sim, 3)
-            item["date"] = item.get("date", "2024-09-01")
-            item["temporal_match"] = temporal_info["temporal_match"]
-            item["temporal_note"] = temporal_info["temporal_note"]
-            item["retrieval_method"] = mode.upper()
             results.append(item)
 
         results.sort(key=lambda x: x["similarity"], reverse=True)
         return results[:top_k]
-
-    def search_local_evidence(self, claim_text: str, top_k: int = 4, claim_year: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Node 4: Tìm kiếm trong Kho Bằng chứng Nội bộ bằng Hybrid Retrieval + Cross-Encoder Reranker."""
-        return self.search_by_mode(claim_text, mode="hybrid_rerank", top_k=top_k, claim_year=claim_year)
 
     def search_live_vietnamese_news(self, queries: List[str], claim_text: str, max_results: int = 4) -> List[Dict[str, Any]]:
         """
@@ -387,10 +422,8 @@ class MultiTierEvidenceRetriever:
                         v2 = self.vectorizer.transform([title_clean.lower()])
                         raw_tfidf_s = float(cosine_similarity(v1, v2)[0][0])
 
-                    sim = self._compute_calibrated_similarity(
-                        claim_text, title_clean, raw_tfidf_s, raw_tfidf_s, raw_tfidf_s
-                    )
-                    short_date = pub_date[:16].strip() if pub_date else "Trực tuyến mới nhất"
+                    sim = self._compute_calibrated_similarity(claim_text, title_clean, raw_tfidf_s)
+                    short_date = pub_date[:16] if pub_date else "Trực tuyến"
 
                     live_evidences.append({
                         "id": f"LIVE-{len(live_evidences)+1}",
@@ -403,15 +436,15 @@ class MultiTierEvidenceRetriever:
                         "pub_date": pub_date,
                         "known_verdict_score": None,
                         "known_verdict_label": None,
+                        "nli_label": None,
                         "topic": "Tin tức Trực tuyến (Live RSS)",
                         "tier": "LIVE_WEB_NEWS",
                         "bm25_score": round(raw_tfidf_s, 3),
-                        "dense_score": round(raw_tfidf_s, 3),
+                        "dense_score": round(sim, 3),
                         "rerank_score": round(sim, 3),
-                        "similarity": round(sim, 3),
-                        "temporal_match": True,
-                        "temporal_note": f"Tin báo chí trực tuyến ({short_date})",
-                        "retrieval_method": "LIVE_RSS_HYBRID"
+                        "temporal_match": f"LIVE_RSS ({short_date})",
+                        "retrieval_method": "GOOGLE_NEWS_RSS",
+                        "similarity": round(sim, 3)
                     })
             except Exception:
                 continue
@@ -420,17 +453,17 @@ class MultiTierEvidenceRetriever:
         return live_evidences[:max_results]
 
     def retrieve_and_filter_by_vosoughi_threshold(
-        self, claim_text: str, queries: List[str], claim_year: Optional[int] = None
+        self, claim_text: str, queries: List[str], mode: str = "hybrid_rerank"
     ) -> Dict[str, Any]:
         """
-        Node 5: Hợp nhất Bằng chứng Nội bộ (BM25 + Dense Hybrid + Reranker) + Báo chí Trực tuyến,
-        kiểm tra Temporal Filtering và áp dụng ngưỡng Mục S2.2 (Vosoughi et al., Science 2018):
+        Node 6: Hợp nhất Bằng chứng Nội bộ (Hybrid BM25 + Dense + Reranker) + Trực tuyến
+        và áp dụng quy tắc ngưỡng tại Mục S2.2 (Vosoughi et al., Science, 2018):
           - sim < 0.50  -> Loại bỏ (Discarded)
           - 0.50 <= sim < 0.90 -> Đưa vào kiểm tra Stance/NLI (Needs Inspection)
           - sim >= 0.90 -> Khớp trực tiếp độ tin cậy cao (High-Confidence Match)
         """
-        local_candidates = self.search_local_evidence(claim_text, top_k=4, claim_year=claim_year)
-        live_candidates = self.search_live_vietnamese_news(queries, claim_text, max_results=4)
+        local_candidates = self.search_local_evidence(claim_text, top_k=5, mode=mode)
+        live_candidates = self.search_live_vietnamese_news(queries, claim_text, max_results=3)
 
         all_candidates = local_candidates + live_candidates
         all_candidates.sort(key=lambda x: x["similarity"], reverse=True)
@@ -454,8 +487,7 @@ class MultiTierEvidenceRetriever:
             "accepted_evidences": accepted_evidences[:5],
             "top_candidates_all": all_candidates[:5],
             "stats": {
-                "retrieval_pipeline": "Hybrid (BM25 + Dense SVD-128) + Cross-Encoder Reranker + Temporal Filter",
-                "corpus_size": len(self.local_corpus),
+                "retrieval_mode": mode.upper(),
                 "total_candidates_checked": len(all_candidates),
                 "accepted_above_050": len(accepted_evidences),
                 "discarded_below_050": discarded_count,

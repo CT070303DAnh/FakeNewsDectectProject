@@ -1,0 +1,132 @@
+{
+  "dataset_info": {
+    "name": "Vietnamese Fact Verification Evaluation Set (VNFC-360)",
+    "total_claims": 360,
+    "corpus_size": 599,
+    "labels": {
+      "Supported": 120,
+      "Refuted": 120,
+      "NEI": 120
+    },
+    "fields": [
+      "id",
+      "claim",
+      "label",
+      "gold_evidence",
+      "source",
+      "date",
+      "topic"
+    ]
+  },
+  "official_metrics_summary": {
+    "claim_detection_macro_f1": 1.0,
+    "retrieval_recall_at_5": 0.9778,
+    "retrieval_mrr_at_5": 0.9202,
+    "retrieval_ndcg_at_5": 0.9345,
+    "verification_macro_f1": 0.9944,
+    "evidence_precision": 0.9787,
+    "evidence_recall": 0.9778,
+    "citation_accuracy": 1.0,
+    "end_to_end_evidence_grounded_accuracy": 0.9389,
+    "avg_latency_ms": 11.22,
+    "p95_latency_ms": 12.2
+  },
+  "claim_detection_details": {
+    "total_samples": 300,
+    "macro_f1": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "accuracy": 1.0
+  },
+  "retrieval_comparison": {
+    "bm25": {
+      "method_name": "BM25 Baseline (Okapi BM25)",
+      "recall_at_1": 0.8,
+      "recall_at_3": 0.9056,
+      "recall_at_5": 0.9722,
+      "mrr_at_5": 0.8602,
+      "ndcg_at_5": 0.8879,
+      "evidence_precision": 0.9769,
+      "evidence_recall": 0.9722,
+      "avg_latency_ms": 8.77
+    },
+    "dense": {
+      "method_name": "Dense Semantic Retrieval (SVD/SBERT)",
+      "recall_at_1": 0.8222,
+      "recall_at_3": 0.9222,
+      "recall_at_5": 0.9778,
+      "mrr_at_5": 0.8788,
+      "ndcg_at_5": 0.9034,
+      "evidence_precision": 0.975,
+      "evidence_recall": 0.9778,
+      "avg_latency_ms": 8.62
+    },
+    "hybrid": {
+      "method_name": "Hybrid Retrieval (BM25 + Dense)",
+      "recall_at_1": 0.8222,
+      "recall_at_3": 0.9222,
+      "recall_at_5": 0.9778,
+      "mrr_at_5": 0.8788,
+      "ndcg_at_5": 0.9034,
+      "evidence_precision": 0.975,
+      "evidence_recall": 0.9778,
+      "avg_latency_ms": 8.88
+    },
+    "hybrid_rerank": {
+      "method_name": "Hybrid + Cross-Encoder Reranker + Temporal Filter",
+      "recall_at_1": 0.8889,
+      "recall_at_3": 0.9417,
+      "recall_at_5": 0.9778,
+      "mrr_at_5": 0.9202,
+      "ndcg_at_5": 0.9345,
+      "evidence_precision": 0.9787,
+      "evidence_recall": 0.9778,
+      "avg_latency_ms": 11.23
+    }
+  },
+  "verification_comparison": {
+    "nli_verifier": {
+      "name": "NLI / Stance Transformer Verifier (3-Class)",
+      "macro_f1": 1.0,
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0
+    },
+    "llm_few_shot": {
+      "name": "LLM 3-Shot Evidence-Grounded Verification",
+      "macro_f1": 0.9944,
+      "accuracy": 0.9944,
+      "precision": 0.9945,
+      "recall": 0.9944
+    },
+    "hybrid_consensus": {
+      "name": "Hybrid Evidence-Grounded Consensus (Proposed System)",
+      "macro_f1": 0.9944,
+      "accuracy": 0.9944,
+      "precision": 0.9945,
+      "recall": 0.9944,
+      "confusion_matrix_3class": [
+        [
+          120,
+          0,
+          0
+        ],
+        [
+          0,
+          120,
+          0
+        ],
+        [
+          0,
+          2,
+          118
+        ]
+      ],
+      "labels_order": [
+        "Supported",
+        "Refuted",
+        "NEI"
+      ]
+    }
+  }
+}

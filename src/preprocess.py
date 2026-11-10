@@ -41,18 +41,22 @@ STOPWORDS_QUERY = {
     "xuống", "rất", "quá", "lắm", "nhé", "nha", "ạ", "ơi", "hãy", "cùng"
 }
 
-FACTUAL_VERBS_AND_CUES = [
-    "ban hành", "quyết định", "thông báo", "xác nhận", "công bố", "phát hành",
-    "tăng", "giảm", "xử phạt", "khởi tố", "bắt giữ", "thu hồi", "cấm",
-    "chữa khỏi", "phát hiện", "vỡ đập", "phong tỏa", "sập", "tai nạn",
-    "nghị định", "thông tư", "luật", "bộ y tế", "bộ công an", "chính phủ",
-    "ngân hàng", "ubnd", "tỷ đồng", "triệu đồng", "phần trăm", "%"
+# Tín hiệu đặc trưng cho bài toán Phân loại Check-worthiness (Check-worthiness Classification)
+FACTUAL_CLAIM_INDICATORS = [
+    "ban hành", "quy định", "nghị định", "quyết định", "thông tư", "công bố",
+    "xác nhận", "bác bỏ", "cảnh báo", "phát hành", "triển khai", "chính thức",
+    "tăng", "giảm", "mức lương", "học phí", "lãi suất", "tịch thu", "khóa",
+    "chữa khỏi", "ung thư", "vắc-xin", "tiêm chủng", "sập", "vỡ đập", "phong tỏa",
+    "ngân hàng", "bộ y tế", "bộ công an", "bộ giáo dục", "chính phủ", "quốc hội",
+    "cục hàng không", "tập đoàn điện lực", "evn", "vneid", "bảo hiểm xã hội",
+    "triệu đồng", "tỷ đồng", "nghìn tỷ", "%", "km", "tháng", "năm"
 ]
 
-SUBJECTIVE_OR_FLUFF_CUES = [
-    "mọi người ơi", "share mạnh", "chia sẻ ngay", "bấm vào link", "comment ngay",
-    "inbox ngay", "buồn quá", "vui quá", "theo cảm nhận của mình", "chúc mọi người",
-    "ai cần liên hệ", "tuyển sỉ", "xả kho"
+SUBJECTIVE_CHITCHAT_INDICATORS = [
+    "chúc cả nhà", "chúc mừng sinh nhật", "theo ý kiến cá nhân", "theo gu thẩm mỹ",
+    "mình cảm thấy", "ước gì", "điểm danh cái nào", "thả tim", "hỏi quanh khu vực",
+    "cảm ơn tất cả anh chị em", "bấm vào trang cá nhân của shop", "vui vẻ nhé",
+    "haha", "hihi", "buồn và mệt mỏi"
 ]
 
 
@@ -61,6 +65,48 @@ def normalize_vietnamese_unicode(text: str) -> str:
     if not isinstance(text, str):
         return ""
     return unicodedata.normalize("NFC", text)
+
+
+def predict_check_worthiness(sentence: str) -> Dict[str, Any]:
+    """
+    Node 3A: Mô hình phân loại Check-worthiness (Text Classification cho Check-worthiness).
+    Xác định một câu có phải là mệnh đề thực tế cần kiểm chứng (Check-worthy Factual Claim)
+    hay chỉ là câu cảm thán, ý kiến cá nhân, lời chào hỏi trên mạng xã hội.
+    """
+    norm_s = normalize_vietnamese_unicode(sentence).strip()
+    lower_s = norm_s.lower()
+
+    if len(norm_s) < 12:
+        return {
+            "sentence": norm_s,
+            "is_check_worthy": False,
+            "check_worthiness_score": 0.10,
+            "claim_type": "Too Short / Fragment"
+        }
+
+    # Đếm tín hiệu thực tế (số liệu, ngày tháng, tổ chức, động từ khẳng định/chính sách)
+    factual_hits = sum(1 for kw in FACTUAL_CLAIM_INDICATORS if kw in lower_s)
+    has_numbers = bool(re.search(r"\d+", lower_s))
+    has_capitals = bool(re.search(r"[A-ZĐÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴ]", norm_s[1:]))
+    subjective_hits = sum(1 for kw in SUBJECTIVE_CHITCHAT_INDICATORS if kw in lower_s)
+
+    score = 0.45
+    score += min(0.42, factual_hits * 0.14)
+    if has_numbers:
+        score += 0.15
+    if has_capitals:
+        score += 0.08
+    score -= min(0.65, subjective_hits * 0.35)
+
+    score = max(0.02, min(0.99, round(score, 3)))
+    is_worthy = score >= 0.50
+
+    return {
+        "sentence": norm_s,
+        "is_check_worthy": is_worthy,
+        "check_worthiness_score": score,
+        "claim_type": "Factual Claim (Đáng kiểm chứng)" if is_worthy else "Opinion / Social Chitchat (Không cần kiểm chứng)"
+    }
 
 
 def extract_text_from_url_if_needed(raw_input: str) -> Dict[str, Any]:
@@ -139,66 +185,11 @@ def clean_text(text: str) -> str:
     return tokens
 
 
-def classify_check_worthiness(sentence: str) -> Dict[str, Any]:
+def extract_claims_and_queries(raw_text: str) -> Dict[str, Any]:
     """
-    Node 3A: Phân loại Check-worthiness (Xác định câu có chứa mệnh đề thực tế đáng kiểm chứng hay không).
-    Đánh giá dựa trên mật độ thực thể định danh (NER), số liệu/mốc thời gian, động từ khẳng định sự kiện
-    và trừ điểm với các câu cảm thán/kêu gọi tương tác MXH.
-    """
-    s_clean = normalize_vietnamese_unicode(sentence).strip()
-    s_lower = s_clean.lower()
-
-    if len(s_clean) < 18:
-        return {"sentence": s_clean, "score": 0.15, "is_check_worthy": False, "reason": "Câu quá ngắn"}
-
-    score = 0.45
-    reasons = []
-
-    # 1. Có chứa con số, tỷ lệ %, tiền tệ hoặc ngày tháng
-    num_matches = re.findall(
-        r"\b(?:\d{1,2}/\d{1,2}(?:/\d{2,4})?|\d+(?:[.,]\d+)?\s*(?:%|triệu|tỷ|nghìn|đồng|usd|ngày|tháng|năm|ca|người)?)\b",
-        s_lower
-    )
-    if num_matches:
-        score += min(0.28, 0.12 * len(num_matches))
-        reasons.append("Chứa số liệu/thời gian định lượng")
-
-    # 2. Có chứa từ khóa sự kiện/chính sách/kiểm chứng
-    factual_hits = [kw for kw in FACTUAL_VERBS_AND_CUES if kw in s_lower]
-    if factual_hits:
-        score += min(0.25, 0.09 * len(factual_hits))
-        reasons.append(f"Chứa vị ngữ sự kiện ({', '.join(factual_hits[:2])})")
-
-    # 3. Có chứa cụm từ viết hoa (Tên cơ quan, địa danh, nhân vật)
-    cap_matches = re.findall(
-        r"\b[A-ZĐÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴ][a-zàáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]+",
-        s_clean[1:] if len(s_clean) > 1 else s_clean
-    )
-    if cap_matches:
-        score += min(0.18, 0.06 * len(cap_matches))
-        reasons.append("Chứa thực thể tên riêng/tổ chức")
-
-    # 4. Giảm điểm nếu là câu kêu gọi tương tác hoặc cảm thán cá nhân
-    fluff_hits = [kw for kw in SUBJECTIVE_OR_FLUFF_CUES if kw in s_lower]
-    if fluff_hits:
-        score -= 0.40
-        reasons.append("Câu kêu gọi tương tác/cảm nghĩ cá nhân")
-
-    final_score = round(max(0.05, min(0.99, score)), 3)
-    is_worthy = final_score >= 0.50
-
-    return {
-        "sentence": s_clean,
-        "score": final_score,
-        "is_check_worthy": is_worthy,
-        "reason": "; ".join(reasons) if reasons else "Mệnh đề trần thuật thông thường"
-    }
-
-
-def extract_claims_and_queries(raw_text: str, use_crf_ner: bool = False) -> Dict[str, Any]:
-    """
-    Node 3: Phát hiện Claim đáng kiểm chứng (Claim Detection / Check-worthiness),
-    Chuẩn hóa Claim (Claim Normalization) & Trích xuất Thực thể (NER) để sinh Search Queries.
+    Node 3: Phát hiện Mệnh đề đáng kiểm chứng (Claim Detection & Check-worthiness),
+    Chuẩn hóa Claim (Claim Normalization) & Trích xuất Thực thể/Thời gian (NER & Temporal Cues)
+    để sinh truy vấn tìm kiếm bằng chứng (Search Queries).
     """
     text = normalize_vietnamese_unicode(raw_text).strip()
     raw_sentences = [
@@ -208,39 +199,47 @@ def extract_claims_and_queries(raw_text: str, use_crf_ner: bool = False) -> Dict
     if not raw_sentences and text:
         raw_sentences = [text]
 
-    # Phân loại Check-worthiness cho từng câu
-    sentence_evaluations = [classify_check_worthiness(s) for s in raw_sentences]
-    worthy_items = [item for item in sentence_evaluations if item["is_check_worthy"]]
-    worthy_items.sort(key=lambda x: x["score"], reverse=True)
+    social_fluff_patterns = re.compile(
+        r"^(mọi người ơi|share mạnh|chia sẻ ngay|bấm vào link|comment ngay|inbox ngay)",
+        re.IGNORECASE
+    )
 
-    factual_claims = [item["sentence"] for item in worthy_items]
+    sentence_evaluations: List[Dict[str, Any]] = []
+    factual_claims: List[str] = []
+
+    for sent in raw_sentences:
+        cleaned_sent = re.sub(r"\s+", " ", sent).strip()
+        # Loại bỏ cụm cảm thán rác ở đầu câu (Claim Normalization)
+        normalized_claim = re.sub(
+            r"^(tin chấn động|thông báo khẩn|tin khẩn|khẩn cấp|chấn động|nóng)\s*[:!-]*\s*",
+            "",
+            cleaned_sent,
+            flags=re.IGNORECASE
+        ).strip()
+        cw = predict_check_worthiness(normalized_claim)
+        sentence_evaluations.append(cw)
+        if cw["is_check_worthy"] and not social_fluff_patterns.search(cleaned_sent):
+            factual_claims.append(normalized_claim)
+
     if not factual_claims:
-        factual_claims = [raw_sentences[0]]
+        factual_claims = [re.sub(r"\s+", " ", s).strip() for s in raw_sentences[:2]]
 
     # Chọn mệnh đề có điểm Check-worthiness cao nhất làm Primary Claim
-    primary_claim = factual_claims[0] if factual_claims else text[:300]
-    primary_check_worthiness = worthy_items[0]["score"] if worthy_items else sentence_evaluations[0]["score"]
-
-    # Chuẩn hóa Claim (Claim Normalization: loại bỏ từ cảm thán đầu câu, chuẩn hóa khoảng trắng)
-    normalized_claim = re.sub(
-        r"^(?:tin khẩn|khẩn cấp|chấn động|nóng|cảnh báo|thông báo khẩn)\s*[:!-]*\s*",
-        "",
-        primary_claim,
-        flags=re.IGNORECASE
-    ).strip()
+    worthy_sorted = sorted(sentence_evaluations, key=lambda x: x["check_worthiness_score"], reverse=True)
+    primary_claim = worthy_sorted[0]["sentence"] if worthy_sorted else factual_claims[0]
+    primary_cw_score = worthy_sorted[0]["check_worthiness_score"] if worthy_sorted else 0.75
 
     # Trích xuất thực thể (Tên riêng, Tổ chức, Con số, Ngày tháng)
     entities: List[str] = []
-    if use_crf_ner:
-        try:
-            ner_tags = ner(primary_claim)
-            for item in ner_tags:
-                if len(item) >= 4 and item[3] != "O":
-                    ent = item[0].strip()
-                    if len(ent) > 1 and ent not in entities:
-                        entities.append(ent)
-        except Exception:
-            pass
+    try:
+        ner_tags = ner(primary_claim)
+        for item in ner_tags:
+            if len(item) >= 4 and item[3] != "O":
+                ent = item[0].strip()
+                if len(ent) > 1 and ent not in entities:
+                    entities.append(ent)
+    except Exception:
+        pass
 
     capitalized_phrases = re.findall(
         r"\b(?:[A-ZĐÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴ][a-zàáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]+\s*){1,4}",
@@ -252,7 +251,7 @@ def extract_claims_and_queries(raw_text: str, use_crf_ner: bool = False) -> Dict
             entities.append(p)
 
     numbers_and_dates = re.findall(
-        r"\b(?:\d{1,2}/\d{1,2}(?:/\d{2,4})?|\d+(?:[.,]\d+)?\s*(?:%|triệu|tỷ|nghìn|ngàn|đồng|usd|ngày|tháng|năm|ca|người)?)\b",
+        r"\b(?:\d{1,2}/\d{1,2}(?:/\d{2,4})?|\d{4}|\d+(?:[.,]\d+)?\s*(?:%|triệu|tỷ|nghìn|ngàn|đồng|usd|ngày|tháng|năm|ca|người|km|tuổi|tiếng)?)\b",
         text,
         re.IGNORECASE
     )
@@ -262,12 +261,8 @@ def extract_claims_and_queries(raw_text: str, use_crf_ner: bool = False) -> Dict
         if len(n_str) >= 2 and n_str not in numbers_clean:
             numbers_clean.append(n_str)
 
-    # Trích xuất mốc năm (Temporal Year) nếu có trong claim để phục vụ Temporal Filtering ở Giai đoạn 2
-    years_in_claim = re.findall(r"\b(20\d{2})\b", text)
-    claim_temporal_year = int(years_in_claim[0]) if years_in_claim else None
-
     # Tạo câu truy vấn tìm kiếm bằng chứng (Search Queries)
-    words = re.sub(r"[^\w\s]", " ", normalized_claim).split()
+    words = re.sub(r"[^\w\s]", " ", primary_claim).split()
     keywords = [w for w in words if w.lower() not in STOPWORDS_QUERY and len(w) > 1]
     query_primary = " ".join(keywords[:14])
 
@@ -281,18 +276,16 @@ def extract_claims_and_queries(raw_text: str, use_crf_ner: bool = False) -> Dict
 
     return {
         "primary_claim": primary_claim,
-        "normalized_claim": normalized_claim,
-        "check_worthiness_score": primary_check_worthiness,
-        "sentence_check_worthiness": sentence_evaluations[:6],
+        "check_worthiness_score": primary_cw_score,
+        "sentence_check_worthiness": sentence_evaluations[:5],
         "all_claims": factual_claims[:4],
         "entities": entities[:8],
         "numbers_dates": numbers_clean[:6],
-        "claim_temporal_year": claim_temporal_year,
         "search_queries": queries[:2] if queries else [text[:100]]
     }
 
 
 if __name__ == "__main__":
-    sample = "Mọi người ơi chia sẻ gấp!! Tin khẩn: Ngân hàng Nhà nước chuẩn bị phát hành tờ tiền mệnh giá 1 triệu đồng từ tháng 8/2024!"
+    sample = "Tin khẩn: Ngân hàng Nhà nước chuẩn bị phát hành tờ tiền mệnh giá 1 triệu đồng từ tháng sau! Share ngay!"
     print("Cleaned:", clean_text(sample))
     print("Claims & Queries:", extract_claims_and_queries(sample))

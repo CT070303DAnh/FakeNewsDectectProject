@@ -1,0 +1,13 @@
+[
+  {
+    "id": "FB-0001",
+    "timestamp": "2026-11-10 19:24:28",
+    "claim": "ca sĩ quân ap đã có con",
+    "predicted_verdict": "TRUE",
+    "predicted_nli_label": "Supported",
+    "user_agreement": true,
+    "user_suggested_label": "Supported",
+    "user_comment": "",
+    "evidence_source_url": "https://tingia.gov.vn/"
+  }
+]

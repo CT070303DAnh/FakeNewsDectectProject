@@ -8,6 +8,7 @@ import os
 import sys
 import json
 import time
+import sqlite3
 from datetime import datetime
 import numpy as np
 
@@ -30,11 +31,6 @@ except ImportError:
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
-if hasattr(sys.stdout, "reconfigure"):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
 
 from src.preprocess import (
     clean_text,
@@ -58,6 +54,10 @@ app.add_middleware(
 )
 
 MODELS_DIR = os.path.join(BASE_DIR, "models")
+FEEDBACK_DIR = os.path.join(BASE_DIR, "data", "feedback")
+FEEDBACK_DB_PATH = os.path.join(FEEDBACK_DIR, "feedback.db")
+FEEDBACK_JSON_PATH = os.path.join(FEEDBACK_DIR, "user_feedback.json")
+
 models = {}
 phobert_model = None
 phobert_tokenizer = None
@@ -66,20 +66,43 @@ vibert_tokenizer = None
 sbert_model = None
 sbert_tokenizer = None
 metrics = {}
+benchmark_metrics = {}
 d2v_model = None
 background_d2v_centroid = None
 evidence_retriever: MultiTierEvidenceRetriever = None
 
 
+def _init_feedback_storage():
+    os.makedirs(FEEDBACK_DIR, exist_ok=True)
+    conn = sqlite3.connect(FEEDBACK_DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS user_feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            claim_text TEXT NOT NULL,
+            predicted_label TEXT NOT NULL,
+            user_rating TEXT NOT NULL,
+            suggested_label TEXT,
+            user_comment TEXT,
+            evidence_url TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
 def load_resources():
-    global models, metrics, d2v_model, background_d2v_centroid
+    global models, metrics, benchmark_metrics, d2v_model, background_d2v_centroid
     global phobert_model, phobert_tokenizer, vibert_model, vibert_tokenizer, sbert_model, sbert_tokenizer
     global evidence_retriever
 
     os.makedirs(MODELS_DIR, exist_ok=True)
+    _init_feedback_storage()
     print(f"DEBUG: Nạp tài nguyên từ: {MODELS_DIR}")
 
-    # Khởi tạo Module Truy xuất Bằng chứng Đa tầng (Nodes 4, 5, 6)
     if evidence_retriever is None:
         evidence_retriever = MultiTierEvidenceRetriever(BASE_DIR)
 
@@ -88,6 +111,11 @@ def load_resources():
         if os.path.exists(metrics_path):
             with open(metrics_path, "r", encoding="utf-8") as f:
                 metrics = json.load(f)
+
+        bench_path = os.path.join(MODELS_DIR, "factcheck_benchmark_metrics.json")
+        if os.path.exists(bench_path):
+            with open(bench_path, "r", encoding="utf-8") as f:
+                benchmark_metrics = json.load(f)
 
         model_names = ["logistic_regression", "svm", "decision_tree", "naive_bayes", "random_forest"]
         for name in model_names:
@@ -98,7 +126,6 @@ def load_resources():
                 except Exception as model_e:
                     print(f"DEBUG: Lỗi nạp {name}: {model_e}")
 
-        # Load PhoBERT, ViBERT, SBERT (nếu môi trường có cài đặt PyTorch & Transformers)
         if HAS_TORCH:
             phobert_path = os.path.join(MODELS_DIR, "phobert_model")
             if os.path.exists(phobert_path):
@@ -127,7 +154,6 @@ def load_resources():
                 except Exception as sb_e:
                     print(f"DEBUG: Lỗi nạp SBERT: {sb_e}")
 
-        # Load Doc2Vec & tính Vector Nền Γ_b cho Module Novelty (Mục S7.2)
         d2v_path = os.path.join(MODELS_DIR, "doc2vec.model")
         if HAS_GENSIM and os.path.exists(d2v_path):
             d2v_model = Doc2Vec.load(d2v_path)
@@ -145,16 +171,16 @@ load_resources()
 
 class NewsItem(BaseModel):
     text: str
+    retrieval_mode: Optional[str] = "hybrid_rerank"
 
 
-class FeedbackItem(BaseModel):
-    claim: str
-    predicted_verdict: str
-    predicted_nli_label: Optional[str] = "NEI"
-    user_agreement: bool
-    user_suggested_label: Optional[str] = None
+class UserFeedbackItem(BaseModel):
+    claim_text: str
+    predicted_label: str
+    user_rating: str  # "ACCURATE" | "INACCURATE"
+    suggested_label: Optional[str] = ""
     user_comment: Optional[str] = ""
-    evidence_source_url: Optional[str] = ""
+    evidence_url: Optional[str] = ""
 
 
 EDUCATIONAL_CONTENT = {
@@ -229,14 +255,92 @@ def health_check():
     }
 
 
+@app.get("/benchmark-metrics")
+def get_benchmark_metrics():
+    bench_path = os.path.join(MODELS_DIR, "factcheck_benchmark_metrics.json")
+    if os.path.exists(bench_path):
+        with open(bench_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return benchmark_metrics
+
+
+@app.post("/feedback")
+def submit_user_feedback(fb: UserFeedbackItem):
+    """Node 12B: Lưu phản hồi người dùng (User Feedback - Human-in-the-loop) vào SQLite & JSON."""
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    _init_feedback_storage()
+
+    conn = sqlite3.connect(FEEDBACK_DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO user_feedback (claim_text, predicted_label, user_rating, suggested_label, user_comment, evidence_url, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            fb.claim_text,
+            fb.predicted_label,
+            fb.user_rating,
+            fb.suggested_label or "",
+            fb.user_comment or "",
+            fb.evidence_url or "",
+            created_at
+        )
+    )
+    feedback_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    # Lưu đồng thời ra file JSON để dễ kiểm tra trong báo cáo đồ án
+    history = []
+    if os.path.exists(FEEDBACK_JSON_PATH):
+        try:
+            with open(FEEDBACK_JSON_PATH, "r", encoding="utf-8") as f:
+                history = json.load(f)
+        except Exception:
+            history = []
+
+    record = {
+        "id": feedback_id,
+        "claim_text": fb.claim_text,
+        "predicted_label": fb.predicted_label,
+        "user_rating": fb.user_rating,
+        "suggested_label": fb.suggested_label,
+        "user_comment": fb.user_comment,
+        "evidence_url": fb.evidence_url,
+        "created_at": created_at
+    }
+    history.append(record)
+    with open(FEEDBACK_JSON_PATH, "w", encoding="utf-8") as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
+
+    return {
+        "status": "saved",
+        "message": "Đã ghi nhận phản hồi của bạn vào Hệ thống Kiểm chứng (SQLite + JSON).",
+        "feedback_id": feedback_id,
+        "total_feedbacks": len(history)
+    }
+
+
+@app.get("/feedback")
+def list_user_feedback():
+    if os.path.exists(FEEDBACK_JSON_PATH):
+        try:
+            with open(FEEDBACK_JSON_PATH, "r", encoding="utf-8") as f:
+                return {"feedbacks": json.load(f)}
+        except Exception:
+            pass
+    return {"feedbacks": []}
+
+
 @app.post("/predict")
 def predict(item: NewsItem):
-    t_start = time.perf_counter()
+    start_ts = time.perf_counter()
     if not models and phobert_model is None and vibert_model is None and sbert_model is None:
         load_resources()
 
     # =================================================================
-    # GIAI ĐOẠN 1 (Nodes 1, 2, 3): Tiếp nhận, Chuẩn hóa & Tách Mệnh đề
+    # GIAI ĐOẠN 1 (Nodes 1, 2, 3): Tiếp nhận, Chuẩn hóa & Tách Mệnh đề + Check-worthiness
     # =================================================================
     url_info = extract_text_from_url_if_needed(item.text)
     effective_raw_text = url_info["text"]
@@ -246,12 +350,13 @@ def predict(item: NewsItem):
     claim_analysis["source_url"] = url_info["source_url"]
 
     # =================================================================
-    # GIAI ĐOẠN 2 (Nodes 4, 5, 6): Truy xuất Bằng chứng Đa tầng & Lọc Ngưỡng S2.2
+    # GIAI ĐOẠN 2 (Nodes 4, 5, 6): Truy xuất Bằng chứng Lai (BM25 + Dense + Reranker + Temporal)
     # =================================================================
+    mode = item.retrieval_mode if item.retrieval_mode in ("bm25", "dense", "hybrid", "hybrid_rerank") else "hybrid_rerank"
     retrieval_output = evidence_retriever.retrieve_and_filter_by_vosoughi_threshold(
         claim_text=claim_analysis["primary_claim"],
         queries=claim_analysis["search_queries"],
-        claim_year=claim_analysis.get("claim_temporal_year"),
+        mode=mode,
     )
 
     # =================================================================
@@ -259,7 +364,6 @@ def predict(item: NewsItem):
     # =================================================================
     results = {}
 
-    # Node 7A: Dự đoán với 5 mô hình Scikit-learn
     for name in ["logistic_regression", "svm", "decision_tree", "naive_bayes", "random_forest"]:
         if name in models:
             try:
@@ -287,7 +391,6 @@ def predict(item: NewsItem):
             except Exception as e:
                 print(f"DEBUG: Lỗi dự đoán {name}: {e}")
 
-    # Node 7B: Dự đoán với 3 mô hình Deep Learning (PhoBERT, ViBERT, SBERT)
     dl_models = [
         ("phobert", phobert_model, phobert_tokenizer),
         ("vibert", vibert_model, vibert_tokenizer),
@@ -324,14 +427,12 @@ def predict(item: NewsItem):
             except Exception as e:
                 print(f"DEBUG: Lỗi dự đoán DL {name}: {e}")
 
-    # Node 8: Tính Độ mới lạ thông tin (Novelty: IU, KL, BD - Mục S7.2 Science 2018)
     d2v_vector = []
     if d2v_model:
         inferred_vec = d2v_model.infer_vector(cleaned_text.split())
         d2v_vector = inferred_vec.tolist()
         novelty_metrics = compute_novelty_metrics(inferred_vec, background_d2v_centroid)
     else:
-        # Tính phân phối chủ đề dựa trên độ tương đồng với 100 mẫu tin nền đầu tiên trong kho
         if evidence_retriever and evidence_retriever.vectorizer is not None and evidence_retriever.corpus_matrix is not None:
             from sklearn.metrics.pairwise import cosine_similarity
             q_tfidf = evidence_retriever.vectorizer.transform([cleaned_text])
@@ -345,11 +446,10 @@ def predict(item: NewsItem):
         else:
             novelty_metrics = compute_novelty_metrics(np.ones(100))
 
-    # Node 9: Phân tích Cảm xúc (Surprise, Fear, Disgust, Trust), Phản bác (Dissent) & Heuristic
     emotion_heuristics = analyze_emotion_and_heuristics(effective_raw_text)
 
     # =================================================================
-    # GIAI ĐOẠN 4 & 5 (Nodes 10, 11, 12): Đối chiếu Bằng chứng & Hợp nhất Phán quyết
+    # GIAI ĐOẠN 4 & 5 (Nodes 10, 11, 12): Đối chiếu NLI + LLM Few-Shot & Hợp nhất Phán quyết
     # =================================================================
     hybrid_verdict = synthesize_hybrid_verdict(
         claim_info=claim_analysis,
@@ -358,80 +458,22 @@ def predict(item: NewsItem):
         novelty_metrics=novelty_metrics,
         emotion_heuristics=emotion_heuristics,
     )
-    latency_ms = round((time.perf_counter() - t_start) * 1000.0, 2)
+
+    latency_ms = round((time.perf_counter() - start_ts) * 1000.0, 2)
     hybrid_verdict["latency_ms"] = latency_ms
 
     return {
         "input_text": item.text,
         "cleaned_text": cleaned_text,
+        "latency_ms": latency_ms,
         "claim_analysis": claim_analysis,
         "hybrid_verdict": hybrid_verdict,
         "novelty_metrics": novelty_metrics,
         "emotion_heuristics": emotion_heuristics,
         "results": results,
-        "latency_ms": latency_ms,
         "doc2vec_vector": d2v_vector[:10],
         "education_doc2vec": EDUCATIONAL_CONTENT["doc2vec"],
     }
-
-
-@app.get("/benchmark-metrics")
-def get_benchmark_metrics():
-    bench_path = os.path.join(MODELS_DIR, "benchmark_metrics.json")
-    if os.path.exists(bench_path):
-        with open(bench_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-
-@app.post("/feedback")
-def submit_user_feedback(fb: FeedbackItem):
-    feedback_dir = os.path.join(BASE_DIR, "data", "feedback")
-    os.makedirs(feedback_dir, exist_ok=True)
-    feedback_file = os.path.join(feedback_dir, "user_feedback.json")
-
-    existing = []
-    if os.path.exists(feedback_file):
-        try:
-            with open(feedback_file, "r", encoding="utf-8") as f:
-                existing = json.load(f)
-        except Exception:
-            existing = []
-
-    record = {
-        "id": f"FB-{len(existing)+1:04d}",
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "claim": fb.claim[:500],
-        "predicted_verdict": fb.predicted_verdict,
-        "predicted_nli_label": fb.predicted_nli_label,
-        "user_agreement": fb.user_agreement,
-        "user_suggested_label": fb.user_suggested_label or fb.predicted_nli_label,
-        "user_comment": fb.user_comment[:500] if fb.user_comment else "",
-        "evidence_source_url": fb.evidence_source_url or "",
-    }
-    existing.insert(0, record)
-    with open(feedback_file, "w", encoding="utf-8") as f:
-        json.dump(existing[:200], f, ensure_ascii=False, indent=2)
-
-    return {
-        "status": "saved",
-        "message": "Đã ghi nhận phản hồi của người dùng vào Kho kiểm duyệt Human-in-the-loop.",
-        "feedback_id": record["id"],
-        "total_feedback_count": len(existing),
-    }
-
-
-@app.get("/feedback")
-def list_user_feedback():
-    feedback_file = os.path.join(BASE_DIR, "data", "feedback", "user_feedback.json")
-    if os.path.exists(feedback_file):
-        try:
-            with open(feedback_file, "r", encoding="utf-8") as f:
-                items = json.load(f)
-            return {"count": len(items), "items": items[:20]}
-        except Exception:
-            pass
-    return {"count": 0, "items": []}
 
 
 if os.path.exists(os.path.join(BASE_DIR, "frontend", "dist")):

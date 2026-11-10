@@ -34,20 +34,25 @@ interface TrainingResult {
 }
 
 interface BenchmarkMetrics {
-  dataset_info: {
+  dataset_info?: {
     name: string;
     total_claims: number;
-    corpus_documents: number;
+    corpus_size: number;
   };
-  claim_detection: {
-    total_sentences_tested: number;
-    accuracy: number;
-    precision_macro: number;
-    recall_macro: number;
-    macro_f1: number;
+  official_metrics_summary?: {
+    claim_detection_macro_f1: number;
+    retrieval_recall_at_5: number;
+    retrieval_mrr_at_5: number;
+    retrieval_ndcg_at_5: number;
+    verification_macro_f1: number;
+    evidence_precision: number;
+    evidence_recall: number;
+    citation_accuracy: number;
+    end_to_end_evidence_grounded_accuracy: number;
+    avg_latency_ms: number;
   };
-  retrieval_comparison: Record<string, {
-    mode: string;
+  retrieval_comparison?: Record<string, {
+    method_name: string;
     recall_at_1: number;
     recall_at_3: number;
     recall_at_5: number;
@@ -56,25 +61,13 @@ interface BenchmarkMetrics {
     evidence_precision: number;
     avg_latency_ms: number;
   }>;
-  verification_comparison: Record<string, {
+  verification_comparison?: Record<string, {
     name: string;
-    accuracy: number;
-    macro_precision: number;
-    macro_recall: number;
     macro_f1: number;
+    accuracy: number;
+    precision: number;
+    recall: number;
   }>;
-  evidence_quality: {
-    evidence_precision: number;
-    evidence_recall: number;
-    evidence_f1: number;
-    citation_accuracy: number;
-    end_to_end_grounded_accuracy: number;
-  };
-  latency: {
-    avg_end_to_end_ms: number;
-    p95_end_to_end_ms: number;
-    avg_retrieval_ms: number;
-  };
 }
 
 const IconPlay = () => (
@@ -128,10 +121,10 @@ const TrainingPage: React.FC = () => {
   useEffect(() => {
     const fetchStatsAndResults = async () => {
       try {
-        const bRes = await axios.get('http://localhost:8000/benchmark-metrics');
-        if (bRes.data && bRes.data.dataset_info) setBenchmark(bRes.data);
+        const benchRes = await axios.get('http://localhost:8000/benchmark-metrics');
+        if (benchRes.data) setBenchmark(benchRes.data);
       } catch {
-        // fallback to port 8001 below
+        // ignore if port 8000 not queried yet
       }
       try {
         const [statsRes, resultsRes] = await Promise.all([
@@ -273,7 +266,8 @@ const TrainingPage: React.FC = () => {
                   disabled={isTraining}
                   className="cursor-pointer w-full bg-[#F8FAFC] border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-[#0F172A] focus:border-[#1E40AF] outline-none"
                 >
-                  <option value="all">5 Mô hình Machine Learning + Doc2Vec</option>
+                  <option value="all">5 Mô hình ML + Doc2Vec + Full Benchmark</option>
+                  <option value="benchmark">Chạy Đánh Giá Benchmark Đề Tài 8 (VNFC-360)</option>
                   <option value="phobert">VinAI PhoBERT (Transformer)</option>
                   <option value="vibert">FPTAI ViBERT (Transformer)</option>
                   <option value="sbert">Vietnamese SBERT (Bi-Encoder)</option>
@@ -422,122 +416,103 @@ const TrainingPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Official Fact-Checking Benchmark Report (VN-FactCheck-350) */}
-          {benchmark && (
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5">
-              <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
-                <div>
-                  <span className="font-mono-code text-xs font-bold text-[#1E40AF] uppercase">
-                    Official Fact-Checking Benchmark • {benchmark.dataset_info.name}
-                  </span>
-                  <h2 className="text-lg font-bold text-[#0F172A] mt-0.5">
-                    Bảng Đánh Giá Thực Nghiệm Toàn Diện ({benchmark.dataset_info.total_claims} Claims • {benchmark.dataset_info.corpus_documents} Evidence Docs)
-                  </h2>
-                </div>
-                <span className="font-mono-code text-xs px-3 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold">
-                  Avg Latency: {benchmark.latency.avg_end_to_end_ms} ms
+          {/* Official Fact-Checking & Retrieval Benchmark Tables (Row 8 Excel Spec) */}
+          {benchmark && benchmark.official_metrics_summary && (
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-6">
+              <div>
+                <span className="font-mono-code text-xs font-bold text-[#1E40AF] uppercase">
+                  Vietnamese Fact Verification Evaluation Set ({benchmark.dataset_info?.total_claims || 360} Claims)
                 </span>
+                <h2 className="text-lg font-bold text-[#0F172A] mt-0.5">
+                  Bộ Chỉ Số Thực Nghiệm Chuẩn Đề Tài Số 8 (Retrieval & Evidence-Grounded NLI)
+                </h2>
               </div>
 
-              {/* 5 Core End-to-End KPIs */}
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                <div className="p-3 rounded-xl bg-[#F8FAFC] border border-slate-200">
-                  <span className="text-[11px] text-slate-600 font-semibold block">Claim Detection F1</span>
-                  <span className="font-mono-code text-lg font-bold text-[#1E40AF]">
-                    {(benchmark.claim_detection.macro_f1 * 100).toFixed(1)}%
-                  </span>
-                </div>
-                <div className="p-3 rounded-xl bg-[#F8FAFC] border border-slate-200">
-                  <span className="text-[11px] text-slate-600 font-semibold block">Evidence Precision</span>
-                  <span className="font-mono-code text-lg font-bold text-[#0F172A]">
-                    {(benchmark.evidence_quality.evidence_precision * 100).toFixed(1)}%
-                  </span>
-                </div>
-                <div className="p-3 rounded-xl bg-[#F8FAFC] border border-slate-200">
-                  <span className="text-[11px] text-slate-600 font-semibold block">Evidence Recall@5</span>
-                  <span className="font-mono-code text-lg font-bold text-emerald-700">
-                    {(benchmark.evidence_quality.evidence_recall * 100).toFixed(1)}%
-                  </span>
-                </div>
-                <div className="p-3 rounded-xl bg-[#F8FAFC] border border-slate-200">
-                  <span className="text-[11px] text-slate-600 font-semibold block">Citation Accuracy</span>
-                  <span className="font-mono-code text-lg font-bold text-emerald-700">
-                    {(benchmark.evidence_quality.citation_accuracy * 100).toFixed(1)}%
-                  </span>
-                </div>
-                <div className="p-3 rounded-xl bg-[#F8FAFC] border border-slate-200">
-                  <span className="text-[11px] text-slate-600 font-semibold block">E2E Grounded Acc</span>
-                  <span className="font-mono-code text-lg font-bold text-[#1E40AF]">
-                    {(benchmark.evidence_quality.end_to_end_grounded_accuracy * 100).toFixed(1)}%
-                  </span>
-                </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  { label: 'Claim Detection F1', val: `${(benchmark.official_metrics_summary.claim_detection_macro_f1 * 100).toFixed(1)}%` },
+                  { label: 'Retrieval Recall@5', val: `${(benchmark.official_metrics_summary.retrieval_recall_at_5 * 100).toFixed(1)}%` },
+                  { label: 'MRR@5 / NDCG@5', val: `${(benchmark.official_metrics_summary.retrieval_mrr_at_5 * 100).toFixed(1)}% / ${(benchmark.official_metrics_summary.retrieval_ndcg_at_5 * 100).toFixed(1)}%` },
+                  { label: 'Verification Macro-F1', val: `${(benchmark.official_metrics_summary.verification_macro_f1 * 100).toFixed(1)}%` },
+                  { label: 'Evidence Precision', val: `${(benchmark.official_metrics_summary.evidence_precision * 100).toFixed(1)}%` },
+                  { label: 'Citation Accuracy', val: `${(benchmark.official_metrics_summary.citation_accuracy * 100).toFixed(1)}%` },
+                  { label: 'E2E Grounded Acc', val: `${(benchmark.official_metrics_summary.end_to_end_evidence_grounded_accuracy * 100).toFixed(1)}%` },
+                  { label: 'Avg Latency', val: `${benchmark.official_metrics_summary.avg_latency_ms} ms` },
+                ].map((m, idx) => (
+                  <div key={idx} className="p-3 rounded-xl bg-[#F8FAFC] border border-slate-200">
+                    <span className="font-mono-code text-[10px] font-bold text-[#1E40AF] uppercase block">{m.label}</span>
+                    <span className="font-mono-code text-base font-bold text-[#0F172A] mt-1 block">{m.val}</span>
+                  </div>
+                ))}
               </div>
 
-              {/* Retrieval & Reranking Comparison Table */}
-              <div>
-                <h3 className="font-mono-code text-xs font-bold text-slate-700 uppercase mb-2">
-                  1. So sánh Truy xuất & Xếp hạng Bằng chứng (BM25 vs. Dense vs. Hybrid + Cross-Encoder Reranker)
-                </h3>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="border-b border-slate-200 text-slate-600 font-mono-code uppercase bg-slate-50">
-                        <th className="py-2.5 px-3">Phương pháp Retrieval</th>
-                        <th className="py-2.5 px-3">Recall@1</th>
-                        <th className="py-2.5 px-3">Recall@3</th>
-                        <th className="py-2.5 px-3">Recall@5</th>
-                        <th className="py-2.5 px-3">MRR@5</th>
-                        <th className="py-2.5 px-3">NDCG@5</th>
-                        <th className="py-2.5 px-3">Latency</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 font-mono-code">
-                      {Object.entries(benchmark.retrieval_comparison).map(([key, r]) => (
-                        <tr key={key} className="hover:bg-slate-50">
-                          <td className="py-2.5 px-3 font-bold text-[#1E40AF] uppercase">{key}</td>
-                          <td className="py-2.5 px-3 font-semibold text-[#0F172A]">{(r.recall_at_1 * 100).toFixed(1)}%</td>
-                          <td className="py-2.5 px-3 text-slate-800">{(r.recall_at_3 * 100).toFixed(1)}%</td>
-                          <td className="py-2.5 px-3 font-bold text-emerald-700">{(r.recall_at_5 * 100).toFixed(1)}%</td>
-                          <td className="py-2.5 px-3 font-semibold text-[#0F172A]">{r.mrr_at_5.toFixed(3)}</td>
-                          <td className="py-2.5 px-3 font-semibold text-[#1E40AF]">{r.ndcg_at_5.toFixed(3)}</td>
-                          <td className="py-2.5 px-3 text-slate-500">{r.avg_latency_ms} ms</td>
+              {benchmark.retrieval_comparison && (
+                <div>
+                  <h3 className="font-mono-code text-xs font-bold text-slate-700 uppercase mb-2">
+                    1. So Sánh Truy Xuất Bằng Chứng: BM25 Baseline vs. Dense vs. Hybrid + Cross-Reranker
+                  </h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-200 text-slate-600 font-mono-code uppercase">
+                          <th className="py-2.5 px-2">Phương pháp Truy xuất</th>
+                          <th className="py-2.5 px-2">Recall@1</th>
+                          <th className="py-2.5 px-2">Recall@3</th>
+                          <th className="py-2.5 px-2">Recall@5</th>
+                          <th className="py-2.5 px-2">MRR@5</th>
+                          <th className="py-2.5 px-2">NDCG@5</th>
+                          <th className="py-2.5 px-2">Ev.Precision</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-mono-code">
+                        {Object.entries(benchmark.retrieval_comparison).map(([k, r]) => (
+                          <tr key={k} className={k === 'hybrid_rerank' ? 'bg-blue-50/60 font-bold' : ''}>
+                            <td className="py-2.5 px-2 text-[#1E40AF]">{r.method_name}</td>
+                            <td className="py-2.5 px-2">{(r.recall_at_1 * 100).toFixed(1)}%</td>
+                            <td className="py-2.5 px-2">{(r.recall_at_3 * 100).toFixed(1)}%</td>
+                            <td className="py-2.5 px-2 text-emerald-700">{(r.recall_at_5 * 100).toFixed(1)}%</td>
+                            <td className="py-2.5 px-2">{(r.mrr_at_5 * 100).toFixed(1)}%</td>
+                            <td className="py-2.5 px-2">{(r.ndcg_at_5 * 100).toFixed(1)}%</td>
+                            <td className="py-2.5 px-2">{(r.evidence_precision * 100).toFixed(1)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
+              )}
 
-              {/* 3-Class Verification Comparison Table */}
-              <div>
-                <h3 className="font-mono-code text-xs font-bold text-slate-700 uppercase mb-2">
-                  2. So sánh Mô hình Kiểm chứng 3 Nhãn (Supported / Refuted / NEI): NLI vs. LLM Few-Shot Grounded
-                </h3>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="border-b border-slate-200 text-slate-600 font-mono-code uppercase bg-slate-50">
-                        <th className="py-2.5 px-3">Phương pháp Verification</th>
-                        <th className="py-2.5 px-3">Accuracy</th>
-                        <th className="py-2.5 px-3">Macro-Precision</th>
-                        <th className="py-2.5 px-3">Macro-Recall</th>
-                        <th className="py-2.5 px-3">Verification Macro-F1</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 font-mono-code">
-                      {Object.entries(benchmark.verification_comparison).map(([key, v]) => (
-                        <tr key={key} className="hover:bg-slate-50">
-                          <td className="py-2.5 px-3 font-bold text-[#0F172A]">{v.name}</td>
-                          <td className="py-2.5 px-3 font-semibold text-slate-800">{(v.accuracy * 100).toFixed(1)}%</td>
-                          <td className="py-2.5 px-3 text-slate-700">{(v.macro_precision * 100).toFixed(1)}%</td>
-                          <td className="py-2.5 px-3 text-slate-700">{(v.macro_recall * 100).toFixed(1)}%</td>
-                          <td className="py-2.5 px-3 font-bold text-[#1E40AF]">{(v.macro_f1 * 100).toFixed(1)}%</td>
+              {benchmark.verification_comparison && (
+                <div>
+                  <h3 className="font-mono-code text-xs font-bold text-slate-700 uppercase mb-2">
+                    2. So Sánh Suy Luận Kiểm Chứng 3 Nhãn (Supported / Refuted / NEI): NLI vs. LLM Few-Shot
+                  </h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-200 text-slate-600 font-mono-code uppercase">
+                          <th className="py-2.5 px-2">Mô hình Suy luận (Verifier)</th>
+                          <th className="py-2.5 px-2">Macro-F1</th>
+                          <th className="py-2.5 px-2">Accuracy</th>
+                          <th className="py-2.5 px-2">Precision</th>
+                          <th className="py-2.5 px-2">Recall</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-mono-code">
+                        {Object.entries(benchmark.verification_comparison).map(([k, v]) => (
+                          <tr key={k} className={k === 'hybrid_consensus' ? 'bg-emerald-50/60 font-bold' : ''}>
+                            <td className="py-2.5 px-2 text-[#0F172A]">{v.name}</td>
+                            <td className="py-2.5 px-2 text-emerald-700">{(v.macro_f1 * 100).toFixed(2)}%</td>
+                            <td className="py-2.5 px-2">{(v.accuracy * 100).toFixed(2)}%</td>
+                            <td className="py-2.5 px-2">{(v.precision * 100).toFixed(2)}%</td>
+                            <td className="py-2.5 px-2">{(v.recall * 100).toFixed(2)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
 
