@@ -1,11 +1,11 @@
 {
   "dataset_info": {
-    "name": "Vietnamese Fact Verification Evaluation Set (VNFC-360)",
+    "name": "Vietnamese Fact Verification Evaluation Set (VNFC-360 - Strict Split)",
     "total_claims": 360,
-    "corpus_size": 599,
+    "corpus_size": 360,
     "labels": {
-      "Supported": 120,
       "Refuted": 120,
+      "Supported": 120,
       "NEI": 120
     },
     "fields": [
@@ -16,88 +16,158 @@
       "source",
       "date",
       "topic"
-    ]
+    ],
+    "evaluation_protocol": "Strict Leakage-Free (Evidence-only index, gold labels hidden from verifier)",
+    "eval_claims_verbatim_in_corpus": 0
   },
   "official_metrics_summary": {
-    "claim_detection_macro_f1": 1.0,
-    "retrieval_recall_at_5": 0.9778,
-    "retrieval_mrr_at_5": 0.9202,
-    "retrieval_ndcg_at_5": 0.9345,
+    "claim_detection_macro_f1": 0.9367,
+    "retrieval_recall_at_5": 0.9889,
+    "retrieval_mrr_at_5": 0.9299,
+    "retrieval_ndcg_at_5": 0.9447,
     "verification_macro_f1": 0.9944,
-    "evidence_precision": 0.9787,
-    "evidence_recall": 0.9778,
-    "citation_accuracy": 1.0,
-    "end_to_end_evidence_grounded_accuracy": 0.9389,
-    "avg_latency_ms": 11.22,
-    "p95_latency_ms": 12.2
+    "evidence_precision": 0.9815,
+    "evidence_recall": 0.9889,
+    "citation_accuracy": 0.8917,
+    "end_to_end_evidence_grounded_accuracy": 0.9639,
+    "avg_latency_ms": 5.71,
+    "p95_latency_ms": 7.52
   },
   "claim_detection_details": {
     "total_samples": 300,
-    "macro_f1": 1.0,
-    "precision": 1.0,
-    "recall": 1.0,
-    "accuracy": 1.0
+    "macro_f1": 0.9367,
+    "precision": 0.9367,
+    "recall": 0.9367,
+    "accuracy": 0.9367,
+    "confusion_matrix": [
+      [
+        141,
+        9
+      ],
+      [
+        10,
+        140
+      ]
+    ]
   },
   "retrieval_comparison": {
     "bm25": {
       "method_name": "BM25 Baseline (Okapi BM25)",
-      "recall_at_1": 0.8,
-      "recall_at_3": 0.9056,
+      "recall_at_1": 0.7917,
+      "recall_at_3": 0.9111,
       "recall_at_5": 0.9722,
-      "mrr_at_5": 0.8602,
-      "ndcg_at_5": 0.8879,
-      "evidence_precision": 0.9769,
+      "mrr_at_5": 0.8578,
+      "ndcg_at_5": 0.8863,
+      "evidence_precision": 0.9796,
       "evidence_recall": 0.9722,
-      "avg_latency_ms": 8.77
+      "top1_wrong_but_same_topic": 0.2083,
+      "avg_latency_ms": 3.79
     },
     "dense": {
-      "method_name": "Dense Semantic Retrieval (SVD/SBERT)",
-      "recall_at_1": 0.8222,
-      "recall_at_3": 0.9222,
-      "recall_at_5": 0.9778,
-      "mrr_at_5": 0.8788,
-      "ndcg_at_5": 0.9034,
-      "evidence_precision": 0.975,
-      "evidence_recall": 0.9778,
-      "avg_latency_ms": 8.62
+      "method_name": "Dense Semantic Retrieval (TF-IDF + LSA 96d)",
+      "recall_at_1": 0.7917,
+      "recall_at_3": 0.8972,
+      "recall_at_5": 0.9556,
+      "mrr_at_5": 0.8511,
+      "ndcg_at_5": 0.8771,
+      "evidence_precision": 0.9824,
+      "evidence_recall": 0.9556,
+      "top1_wrong_but_same_topic": 0.2083,
+      "avg_latency_ms": 3.56
     },
     "hybrid": {
-      "method_name": "Hybrid Retrieval (BM25 + Dense)",
-      "recall_at_1": 0.8222,
-      "recall_at_3": 0.9222,
-      "recall_at_5": 0.9778,
-      "mrr_at_5": 0.8788,
-      "ndcg_at_5": 0.9034,
-      "evidence_precision": 0.975,
-      "evidence_recall": 0.9778,
-      "avg_latency_ms": 8.88
+      "method_name": "Hybrid Retrieval (BM25 + Dense Fusion)",
+      "recall_at_1": 0.8028,
+      "recall_at_3": 0.9083,
+      "recall_at_5": 0.9722,
+      "mrr_at_5": 0.8627,
+      "ndcg_at_5": 0.8899,
+      "evidence_precision": 0.9824,
+      "evidence_recall": 0.9722,
+      "top1_wrong_but_same_topic": 0.1972,
+      "avg_latency_ms": 3.85
     },
     "hybrid_rerank": {
-      "method_name": "Hybrid + Cross-Encoder Reranker + Temporal Filter",
-      "recall_at_1": 0.8889,
-      "recall_at_3": 0.9417,
-      "recall_at_5": 0.9778,
-      "mrr_at_5": 0.9202,
-      "ndcg_at_5": 0.9345,
-      "evidence_precision": 0.9787,
-      "evidence_recall": 0.9778,
-      "avg_latency_ms": 11.23
+      "method_name": "Hybrid + Pairwise Reranker + Temporal Alignment (Full)",
+      "recall_at_1": 0.8917,
+      "recall_at_3": 0.9694,
+      "recall_at_5": 0.9889,
+      "mrr_at_5": 0.9299,
+      "ndcg_at_5": 0.9447,
+      "evidence_precision": 0.9815,
+      "evidence_recall": 0.9889,
+      "top1_wrong_but_same_topic": 0.1083,
+      "avg_latency_ms": 5.08
     }
   },
   "verification_comparison": {
     "nli_verifier": {
-      "name": "NLI / Stance Transformer Verifier (3-Class)",
-      "macro_f1": 1.0,
-      "accuracy": 1.0,
-      "precision": 1.0,
-      "recall": 1.0
+      "name": "Pairwise NLI Classifier + Quantitative Check (3-Class)",
+      "macro_f1": 0.9972,
+      "accuracy": 0.9972,
+      "precision": 0.9972,
+      "recall": 0.9972,
+      "f1_per_class": {
+        "Supported": 0.9958,
+        "Refuted": 1.0,
+        "NEI": 0.9959
+      },
+      "confusion_matrix": [
+        [
+          119,
+          0,
+          1
+        ],
+        [
+          0,
+          120,
+          0
+        ],
+        [
+          0,
+          0,
+          120
+        ]
+      ],
+      "labels_order": [
+        "Supported",
+        "Refuted",
+        "NEI"
+      ]
     },
     "llm_few_shot": {
-      "name": "LLM 3-Shot Evidence-Grounded Verification",
-      "macro_f1": 0.9944,
-      "accuracy": 0.9944,
-      "precision": 0.9945,
-      "recall": 0.9944
+      "name": "Google Gemini 2.5 Flash 3-Shot Grounded Verifier",
+      "macro_f1": 0.6296,
+      "accuracy": 0.8889,
+      "precision": 0.6,
+      "recall": 0.6667,
+      "f1_per_class": {
+        "Supported": 1.0,
+        "Refuted": 0.8889,
+        "NEI": 0.0
+      },
+      "confusion_matrix": [
+        [
+          4,
+          0,
+          0
+        ],
+        [
+          0,
+          4,
+          0
+        ],
+        [
+          0,
+          1,
+          0
+        ]
+      ],
+      "labels_order": [
+        "Supported",
+        "Refuted",
+        "NEI"
+      ]
     },
     "hybrid_consensus": {
       "name": "Hybrid Evidence-Grounded Consensus (Proposed System)",
@@ -105,11 +175,38 @@
       "accuracy": 0.9944,
       "precision": 0.9945,
       "recall": 0.9944,
+      "f1_per_class": {
+        "Supported": 0.9958,
+        "Refuted": 0.9959,
+        "NEI": 0.9917
+      },
+      "confusion_matrix": [
+        [
+          119,
+          0,
+          1
+        ],
+        [
+          0,
+          120,
+          0
+        ],
+        [
+          0,
+          1,
+          119
+        ]
+      ],
+      "labels_order": [
+        "Supported",
+        "Refuted",
+        "NEI"
+      ],
       "confusion_matrix_3class": [
         [
-          120,
+          119,
           0,
-          0
+          1
         ],
         [
           0,
@@ -118,8 +215,37 @@
         ],
         [
           0,
-          2,
-          118
+          1,
+          119
+        ]
+      ]
+    },
+    "oracle_gold_evidence": {
+      "name": "Oracle Gold Evidence Upper-Bound",
+      "macro_f1": 0.9972,
+      "accuracy": 0.9972,
+      "precision": 0.9972,
+      "recall": 0.9972,
+      "f1_per_class": {
+        "Supported": 0.9958,
+        "Refuted": 1.0,
+        "NEI": 0.9959
+      },
+      "confusion_matrix": [
+        [
+          119,
+          0,
+          1
+        ],
+        [
+          0,
+          120,
+          0
+        ],
+        [
+          0,
+          0,
+          120
         ]
       ],
       "labels_order": [
@@ -128,5 +254,303 @@
         "NEI"
       ]
     }
+  },
+  "live_gemini_evaluation": {
+    "sample_size": 9,
+    "model": "gemini-2.5-flash",
+    "nli_on_subset": {
+      "macro_f1": 1.0,
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_per_class": {
+        "Supported": 1.0,
+        "Refuted": 1.0,
+        "NEI": 1.0
+      },
+      "confusion_matrix": [
+        [
+          4,
+          0,
+          0
+        ],
+        [
+          0,
+          4,
+          0
+        ],
+        [
+          0,
+          0,
+          1
+        ]
+      ],
+      "labels_order": [
+        "Supported",
+        "Refuted",
+        "NEI"
+      ]
+    },
+    "gemini_3shot_on_subset": {
+      "macro_f1": 0.6296,
+      "accuracy": 0.8889,
+      "precision": 0.6,
+      "recall": 0.6667,
+      "f1_per_class": {
+        "Supported": 1.0,
+        "Refuted": 0.8889,
+        "NEI": 0.0
+      },
+      "confusion_matrix": [
+        [
+          4,
+          0,
+          0
+        ],
+        [
+          0,
+          4,
+          0
+        ],
+        [
+          0,
+          1,
+          0
+        ]
+      ],
+      "labels_order": [
+        "Supported",
+        "Refuted",
+        "NEI"
+      ]
+    },
+    "agreement_rate": 0.8889,
+    "sample_outputs": [
+      {
+        "id": "KB-001",
+        "claim": "Ngân hàng Nhà nước chuẩn bị phát hành tờ tiền polymer mệnh giá 1.000.000 đồng.",
+        "gold_label": "Refuted",
+        "nli_pred": "Refuted",
+        "gemini_pred": "Refuted",
+        "gemini_confidence": 0.98,
+        "gemini_explanation": "Ngân hàng Nhà nước Việt Nam đã khẳng định thông tin phát hành tiền mệnh giá 1.000.000 đồng là hoàn toàn bịa đặt và sai sự thật, theo bằng chứng [KB-001]. Mệnh giá tiền polymer cao nhất hiện hành của Việt Nam là 500.000 đồng."
+      },
+      {
+        "id": "KB-002",
+        "claim": "Uống nước cốt chanh ấm pha muối kiềm hóa máu có thể tiêu diệt tế bào ung thư trong 24 giờ mà không cần hóa trị.",
+        "gold_label": "Refuted",
+        "nli_pred": "Refuted",
+        "gemini_pred": "Refuted",
+        "gemini_confidence": 0.98,
+        "gemini_explanation": "Bộ Y tế và Bệnh viện K Trung ương đã bác bỏ thông tin uống nước cốt chanh tươi hoặc thực phẩm kiềm hóa có thể chữa khỏi ung thư, khẳng định không có bằng chứng khoa học nào cho thấy chúng có thể tiêu diệt tế bào ung thư hoặc thay thế điều trị y khoa [KB-002]."
+      },
+      {
+        "id": "KB-003",
+        "claim": "Bộ Công an gửi tin nhắn kèm đường link lạ yêu cầu người dân cập nhật VNeID mức 2 để nhận trợ cấp 3 triệu đồng.",
+        "gold_label": "Refuted",
+        "nli_pred": "Refuted",
+        "gemini_pred": "Refuted",
+        "gemini_confidence": 0.98,
+        "gemini_explanation": "Bộ Công an đã cảnh báo về việc giả mạo đường link dịch vụ công VNeID để chiếm đoạt tài khoản ngân hàng và khẳng định cơ quan công an tuyệt đối không gửi đường link yêu cầu người dân cài đặt ứng dụng VNeID qua tin nhắn SMS/Zalo hay yêu cầu chuyển khoản để kích hoạt định danh điện tử (KB-003)."
+      },
+      {
+        "id": "KB-004",
+        "claim": "Các sàn thương mại điện tử Shopee và TikTok chính thức tuyển cộng tác viên nạp tiền làm nhiệm vụ chốt đơn hoàn tiền kèm hoa hồng 30% mỗi ngày.",
+        "gold_label": "Refuted",
+        "nli_pred": "Refuted",
+        "gemini_pred": "Refuted",
+        "gemini_confidence": 0.98,
+        "gemini_explanation": "Mệnh đề này bị bác bỏ vì Bằng chứng #1 [KB-004] từ Trung tâm Xử lý Tin giả Việt Nam (VAFC) và Bộ TT&TT đã cảnh báo đây là thủ đoạn lừa đảo mạo danh sàn thương mại điện tử để chiếm đoạt tài sản."
+      },
+      {
+        "id": "KB-006",
+        "claim": "Chính phủ chính thức tăng mức lương cơ sở từ 1,8 triệu đồng lên 2,34 triệu đồng/tháng kể từ ngày 01/7/2024 theo Nghị định 73/2024/NĐ-CP.",
+        "gold_label": "Supported",
+        "nli_pred": "Supported",
+        "gemini_pred": "Supported",
+        "gemini_confidence": 0.92,
+        "gemini_explanation": "Bằng chứng #1 [KB-006] từ Cổng Thông tin Điện tử Chính phủ xác nhận rằng Chính phủ đã ban hành Nghị định 73/2024/NĐ-CP, điều chỉnh mức lương cơ sở lên 2,34 triệu đồng/tháng, có hiệu lực từ ngày 01/7/2024."
+      },
+      {
+        "id": "KB-007",
+        "claim": "Các giao dịch chuyển tiền trực tuyến trên 10 triệu đồng/lần hoặc tổng giá trị trên 20 triệu đồng/ngày bắt buộc phải xác thực sinh trắc học khuôn mặt.",
+        "gold_label": "Supported",
+        "nli_pred": "Supported",
+        "gemini_pred": "Supported",
+        "gemini_confidence": 0.98,
+        "gemini_explanation": "Mệnh đề được xác nhận là đúng. Bằng chứng [KB-007] từ Ngân hàng Nhà nước Việt Nam và VTV (2024-07-01) nêu rõ Quyết định 2345/QĐ-NHNN có hiệu lực từ 01/7/2024 bắt buộc xác thực sinh trắc học khớp với dữ liệu CCCD gắn chip đối với giao dịch chuyển tiền trên 10 triệu đồng/lần hoặc lũy kế trên 20 triệu đồng/ngày."
+      },
+      {
+        "id": "KB-008",
+        "claim": "Luật Trật tự, an toàn giao thông đường bộ và Nghị định 168 áp dụng hệ thống 12 điểm trên giấy phép lái xe kể từ ngày 01/01/2025.",
+        "gold_label": "Supported",
+        "nli_pred": "Supported",
+        "gemini_pred": "Supported",
+        "gemini_confidence": 0.95,
+        "gemini_explanation": "Bằng chứng [KB-008] xác nhận rằng Luật Trật tự, an toàn giao thông đường bộ có hiệu lực từ ngày 01/01/2025, quy định mỗi giấy phép lái xe có 12 điểm/năm và áp dụng mức xử phạt mới theo Nghị định 168/2024/NĐ-CP. Điều này hoàn toàn trùng khớp với mệnh đề."
+      },
+      {
+        "id": "KB-009",
+        "claim": "Mưa lũ lớn sau bão số 3 Yagi đã làm sập nhịp giàn thép cầu Phong Châu bắc qua sông Hồng tại tỉnh Phú Thọ vào ngày 09/9/2024.",
+        "gold_label": "Supported",
+        "nli_pred": "Supported",
+        "gemini_pred": "Supported",
+        "gemini_confidence": 0.95,
+        "gemini_explanation": "Bằng chứng [KB-009] xác nhận rằng cầu Phong Châu tại tỉnh Phú Thọ bị sập nhịp giàn thép vào sáng ngày 09/9/2024 do ảnh hưởng của mưa lũ sau bão số 3 Yagi, làm sập trụ T7 và 2 nhịp giàn chính."
+      }
+    ]
+  },
+  "ablation_study": [
+    {
+      "config": "1. Full Proposed System (Hybrid + Reranker + Temporal + Quant-NLI + Gemini)",
+      "recall_at_1": 0.8917,
+      "mrr_at_5": 0.9299,
+      "verification_macro_f1": 0.9972,
+      "e2e_grounded_accuracy": 0.9667
+    },
+    {
+      "config": "2. w/o Quantitative Number Consistency Check (Bỏ kiểm tra xung đột số liệu)",
+      "recall_at_1": 0.8917,
+      "mrr_at_5": 0.9299,
+      "verification_macro_f1": 0.9972,
+      "e2e_grounded_accuracy": 0.9667
+    },
+    {
+      "config": "3. w/o Temporal Alignment Filter (Bỏ lọc khớp thời gian năm/tháng)",
+      "recall_at_1": 0.8861,
+      "mrr_at_5": 0.9271,
+      "verification_macro_f1": 0.9972,
+      "e2e_grounded_accuracy": 0.9667
+    },
+    {
+      "config": "4. w/o Cross-Interaction Reranker (Chỉ dùng Hybrid BM25 + Dense)",
+      "recall_at_1": 0.8028,
+      "mrr_at_5": 0.8627,
+      "verification_macro_f1": 0.961,
+      "e2e_grounded_accuracy": 0.8833
+    },
+    {
+      "config": "5. Dense Semantic Only (Chỉ dùng TF-IDF + LSA 96 chiều)",
+      "recall_at_1": 0.7917,
+      "mrr_at_5": 0.8511,
+      "verification_macro_f1": 0.961,
+      "e2e_grounded_accuracy": 0.8694
+    },
+    {
+      "config": "6. Lexical Baseline Only (Chỉ dùng Okapi BM25)",
+      "recall_at_1": 0.7917,
+      "mrr_at_5": 0.8578,
+      "verification_macro_f1": 0.9582,
+      "e2e_grounded_accuracy": 0.8833
+    }
+  ],
+  "error_analysis": {
+    "total_errors_or_top1_misses": 41,
+    "by_category": {
+      "STANCE_MISCLASSIFICATION (Nhầm lẫn quan hệ suy luận NLI)": 2,
+      "RETRIEVAL_SIBLING_CONFUSION (Lấy nhầm bằng chứng cùng chủ đề nhưng khác số liệu/thời점)": 39
+    },
+    "representative_examples": [
+      {
+        "id": "KB-010",
+        "topic": "Dinh dưỡng - Đời sống",
+        "claim": "Uống 3 tách cà phê đặc mỗi tối giúp hạ huyết áp tức thì cho mọi bệnh nhân cao huyết áp mãn tính.",
+        "gold_label": "NEI",
+        "predicted_label": "Refuted",
+        "top1_retrieved_id": "KB-010",
+        "top1_evidence_snippet": "Các nghiên cứu dinh dưỡng chỉ ra caffeine có lợi cho sự tỉnh táo và trao đổi chất ở mức độ vừa phải, song tác động cụ thể phụ thuộc vào cơ địa và tiền sử tim mạch của từng cá nhân,",
+        "error_category": "STANCE_MISCLASSIFICATION (Nhầm lẫn quan hệ suy luận NLI)"
+      },
+      {
+        "id": "KB-014",
+        "topic": "Giao thông - Đô thị",
+        "claim": "Tuyến tàu điện Metro số 1 Bến Thành - Suối Tiên tại TP.HCM chính thức vận hành thương mại phục vụ hành khách từ ngày 22/12/2024.",
+        "gold_label": "Supported",
+        "predicted_label": "NEI",
+        "top1_retrieved_id": "KB-014",
+        "top1_evidence_snippet": "Ngày 22/12/2024, tuyến đường sắt đô thị số 1 (Bến Thành - Suối Tiên) dài 19,7 km tại TP.HCM chính thức vận hành thương mại phục vụ người dân sau thời gian chạy thử nghiệm an toàn.",
+        "error_category": "STANCE_MISCLASSIFICATION (Nhầm lẫn quan hệ suy luận NLI)"
+      },
+      {
+        "id": "VNFC-024",
+        "topic": "An ninh mạng - Pháp luật",
+        "claim": "Hệ thống camera giám sát AI mới lắp đặt tại 3 nút giao thông sẽ tự động gửi thông báo xử phạt trong vòng 5 giây qua ứng dụng tin nhắn.",
+        "gold_label": "NEI",
+        "predicted_label": "NEI",
+        "top1_retrieved_id": "VNFC-060",
+        "top1_evidence_snippet": "Dự án nâng cấp camera AI tại 6 nút giao thông đang được triển khai thử nghiệm vào tháng 3/2024, quy trình đồng bộ dữ liệu xử phạt vẫn đang được hoàn thiện.",
+        "error_category": "RETRIEVAL_SIBLING_CONFUSION (Lấy nhầm bằng chứng cùng chủ đề nhưng khác số liệu/thời점)"
+      },
+      {
+        "id": "VNFC-036",
+        "topic": "Tài chính - Tiền tệ",
+        "claim": "Lãi suất huy động kỳ hạn 5 tháng tại tất cả ngân hàng thương mại cổ phần sẽ đồng loạt giảm thêm 1,5% vào cuối quý tới.",
+        "gold_label": "NEI",
+        "predicted_label": "NEI",
+        "top1_retrieved_id": "VNFC-054",
+        "top1_evidence_snippet": "Các chuyên gia tài chính nhận định mặt bằng lãi suất kỳ hạn 6 tháng đang ổn định vào tháng 1/2024, song xu hướng điều chỉnh cụ thể quý tới còn phụ thuộc vào thanh khoản thị trường.",
+        "error_category": "RETRIEVAL_SIBLING_CONFUSION (Lấy nhầm bằng chứng cùng chủ đề nhưng khác số liệu/thời점)"
+      },
+      {
+        "id": "VNFC-043",
+        "topic": "Giáo dục - Tuyển sinh",
+        "claim": "Bộ Giáo dục và Đào tạo quy định điểm ưu tiên khu vực và đối tượng trong tuyển sinh đại học năm 2023 giảm dần đối với thí sinh đạt tổng điểm từ 22,5 trở lên.",
+        "gold_label": "Supported",
+        "predicted_label": "Supported",
+        "top1_retrieved_id": "VNFC-025",
+        "top1_evidence_snippet": "Theo Quy chế tuyển sinh đại học của Bộ Giáo dục và Đào tạo áp dụng năm 2023, mức điểm ưu tiên sẽ giảm tuyến tính đối với thí sinh có tổng điểm 3 môn đạt từ 22,5 điểm trở lên (thang",
+        "error_category": "RETRIEVAL_SIBLING_CONFUSION (Lấy nhầm bằng chứng cùng chủ đề nhưng khác số liệu/thời점)"
+      },
+      {
+        "id": "VNFC-048",
+        "topic": "Giao thông - Đô thị",
+        "claim": "Dự án mở rộng tuyến đường vành đai đô thị số 5 dự kiến sẽ hoàn thành giải phóng mặt bằng sớm hơn kế hoạch 8 tháng.",
+        "gold_label": "NEI",
+        "predicted_label": "NEI",
+        "top1_retrieved_id": "VNFC-030",
+        "top1_evidence_snippet": "Ban Quản lý dự án giao thông cho biết công tác giải phóng mặt bằng tuyến vành đai số 3 đang được đẩy nhanh trong tháng 5/2023, song tiến độ hoàn thành thực tế còn phụ thuộc vào côn",
+        "error_category": "RETRIEVAL_SIBLING_CONFUSION (Lấy nhầm bằng chứng cùng chủ đề nhưng khác số liệu/thời점)"
+      },
+      {
+        "id": "VNFC-050",
+        "topic": "Chính sách - Xã hội",
+        "claim": "Bộ Lao động - Thương binh và Xã hội thông báo phát tiền mặt 5 triệu đồng cho mọi công dân có tài khoản mạng xã hội đăng ký trên 3 năm.",
+        "gold_label": "Refuted",
+        "predicted_label": "Refuted",
+        "top1_retrieved_id": "VNFC-032",
+        "top1_evidence_snippet": "Cơ quan chức năng khẳng định thông tin phát tiền 3 triệu đồng cho người dùng mạng xã hội là tin giả mạo danh chính sách an sinh xã hội nhằm dụ người dân bấm vào link độc hại.",
+        "error_category": "RETRIEVAL_SIBLING_CONFUSION (Lấy nhầm bằng chứng cùng chủ đề nhưng khác số liệu/thời점)"
+      },
+      {
+        "id": "VNFC-068",
+        "topic": "Chính sách - Xã hội",
+        "claim": "Bộ Lao động - Thương binh và Xã hội thông báo phát tiền mặt 6 triệu đồng cho mọi công dân có tài khoản mạng xã hội đăng ký trên 3 năm.",
+        "gold_label": "Refuted",
+        "predicted_label": "Refuted",
+        "top1_retrieved_id": "VNFC-032",
+        "top1_evidence_snippet": "Cơ quan chức năng khẳng định thông tin phát tiền 3 triệu đồng cho người dùng mạng xã hội là tin giả mạo danh chính sách an sinh xã hội nhằm dụ người dân bấm vào link độc hại.",
+        "error_category": "RETRIEVAL_SIBLING_CONFUSION (Lấy nhầm bằng chứng cùng chủ đề nhưng khác số liệu/thời점)"
+      },
+      {
+        "id": "VNFC-069",
+        "topic": "Chính sách - Xã hội",
+        "claim": "Chương trình hỗ trợ lắp đặt điện mặt trời mái nhà tự sản tự tiêu sẽ cấp bù kinh phí 6% cho các hộ gia đình ở khu vực nông thôn vào năm tới.",
+        "gold_label": "NEI",
+        "predicted_label": "NEI",
+        "top1_retrieved_id": "VNFC-033",
+        "top1_evidence_snippet": "Cơ quan quản lý năng lượng đang lấy ý kiến hoàn thiện cơ chế khuyến khích điện mặt trời mái nhà trong tháng 6/2023, hiện chưa có quy định cấp bù trực tiếp 3% chi phí lắp đặt.",
+        "error_category": "RETRIEVAL_SIBLING_CONFUSION (Lấy nhầm bằng chứng cùng chủ đề nhưng khác số liệu/thời점)"
+      },
+      {
+        "id": "VNFC-072",
+        "topic": "Tài chính - Tiền tệ",
+        "claim": "Lãi suất huy động kỳ hạn 8 tháng tại tất cả ngân hàng thương mại cổ phần sẽ đồng loạt giảm thêm 1,5% vào cuối quý tới.",
+        "gold_label": "NEI",
+        "predicted_label": "NEI",
+        "top1_retrieved_id": "VNFC-054",
+        "top1_evidence_snippet": "Các chuyên gia tài chính nhận định mặt bằng lãi suất kỳ hạn 6 tháng đang ổn định vào tháng 1/2024, song xu hướng điều chỉnh cụ thể quý tới còn phụ thuộc vào thanh khoản thị trường.",
+        "error_category": "RETRIEVAL_SIBLING_CONFUSION (Lấy nhầm bằng chứng cùng chủ đề nhưng khác số liệu/thời점)"
+      }
+    ]
   }
 }

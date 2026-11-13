@@ -48,7 +48,7 @@ def print_header(step, title):
 def load_data_from_dir(dir_path):
     if not os.path.exists(dir_path):
         return pd.DataFrame()
-    all_files = [os.path.join(dir_path, f) for f in os.listdir(dir_path) if f.endswith('.csv')]
+    all_files = sorted([os.path.join(dir_path, f) for f in os.listdir(dir_path) if f.endswith('.csv')])
     if not all_files:
         return pd.DataFrame()
     
@@ -61,13 +61,20 @@ def load_data_from_dir(dir_path):
             
             if text_col and label_col:
                 temp_df = temp_df[[text_col, label_col]].rename(columns={text_col: 'text', label_col: 'label'})
+                temp_df = temp_df.dropna(subset=['text', 'label'])
                 dfs.append(temp_df)
                 print(f"    [+] Loaded: {os.path.basename(f)} ({len(temp_df)} records)")
         except:
             pass
             
     if not dfs: return pd.DataFrame()
-    return pd.concat(dfs, ignore_index=True)
+    combined = pd.concat(dfs, ignore_index=True)
+    before = len(combined)
+    combined['text_norm'] = combined['text'].astype(str).str.strip()
+    combined = combined.drop_duplicates(subset=['text_norm']).drop(columns=['text_norm']).reset_index(drop=True)
+    if len(combined) < before:
+        print(f"    [*] Deduplicated {os.path.basename(dir_path)}: {before} -> {len(combined)} unique records")
+    return combined
 
 def train_all_models(data_dir, models_dir):
     start_total = time.time()

@@ -60,6 +60,8 @@ class MultiTierEvidenceRetriever:
         self.corpus_matrix = None
         self.svd_model: Optional[TruncatedSVD] = None
         self.dense_corpus_matrix: Optional[np.ndarray] = None
+        self.sbert_dense_matrix: Optional[np.ndarray] = None
+        self.sbert_embedder_path: str = os.path.join(base_dir, "models", "sbert_model")
 
         self._load_and_index_local_evidence()
 
@@ -335,7 +337,7 @@ class MultiTierEvidenceRetriever:
         elif mode == "dense":
             base_scores = dense_scores
         else:
-            # Hybrid combination
+            # Hybrid combination (BM25 + Dense)
             base_scores = 0.48 * bm25_scores + 0.52 * dense_scores
 
         pool_size = min(len(self.local_corpus), max(top_k * 4, 20))
@@ -367,6 +369,13 @@ class MultiTierEvidenceRetriever:
                 item["rerank_score"] = round(final_sim, 3)
                 item["temporal_match"] = f"UNFILTERED ({item.get('date', 'N/A')})"
                 item["retrieval_method"] = "HYBRID_BM25_DENSE"
+            elif mode == "hybrid_rerank_no_temporal":
+                rerank_info = self._cross_encoder_rerank_score(claim_text, item, b_score, d_score)
+                temp_bonus = self._temporal_alignment_bonus(claim_text, item.get("date", ""))["bonus"]
+                final_sim = float(np.clip(rerank_info["rerank_score"] - temp_bonus, 0.0, 0.99))
+                item["rerank_score"] = round(final_sim, 3)
+                item["temporal_match"] = f"UNFILTERED ({item.get('date', 'N/A')})"
+                item["retrieval_method"] = "HYBRID_RERANK_NO_TEMPORAL"
             else:
                 rerank_info = self._cross_encoder_rerank_score(claim_text, item, b_score, d_score)
                 final_sim = rerank_info["rerank_score"]
@@ -473,14 +482,19 @@ class MultiTierEvidenceRetriever:
 
         for cand in all_candidates:
             sim = cand["similarity"]
+            is_historical = (cand.get("tier") == "HISTORICAL_DATASET")
+            min_threshold = 0.72 if is_historical else 0.50
+
             if sim >= 0.90:
                 cand["vosoughi_s22_band"] = "HIGH_MATCH (>= 0.90: Khớp trực tiếp)"
                 accepted_evidences.append(cand)
-            elif sim >= 0.50:
+            elif sim >= min_threshold:
                 cand["vosoughi_s22_band"] = "INSPECTION_BAND (0.50 - 0.90: Cần đối chiếu NLI)"
                 accepted_evidences.append(cand)
             else:
-                cand["vosoughi_s22_band"] = "DISCARDED (< 0.50: Độ tương đồng thấp)"
+                cand["vosoughi_s22_band"] = (
+                    f"DISCARDED (< {min_threshold:.2f}: Độ tương đồng thấp / không đủ khớp nội dung)"
+                )
                 discarded_count += 1
 
         return {

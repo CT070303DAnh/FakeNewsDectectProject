@@ -1,8 +1,20 @@
+import os
 import re
 import unicodedata
 from typing import Dict, List, Any
 import urllib.request
 from urllib.parse import urlparse
+import numpy as np
+
+try:
+    import joblib
+    HAS_JOBLIB = True
+except ImportError:
+    joblib = None
+    HAS_JOBLIB = False
+
+_CW_MODEL_BUNDLE = None
+_CW_MODEL_LOADED = False
 
 try:
     from underthesea import word_tokenize, ner
@@ -67,9 +79,58 @@ def normalize_vietnamese_unicode(text: str) -> str:
     return unicodedata.normalize("NFC", text)
 
 
+def _load_cw_model():
+    global _CW_MODEL_BUNDLE, _CW_MODEL_LOADED
+    if _CW_MODEL_LOADED:
+        return _CW_MODEL_BUNDLE
+    _CW_MODEL_LOADED = True
+    if not HAS_JOBLIB:
+        return None
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    model_path = os.path.join(base_dir, "models", "check_worthiness_clf.pkl")
+    if os.path.exists(model_path):
+        try:
+            _CW_MODEL_BUNDLE = joblib.load(model_path)
+        except Exception:
+            _CW_MODEL_BUNDLE = None
+    return _CW_MODEL_BUNDLE
+
+
+def _extract_single_structural_features(norm_s: str) -> np.ndarray:
+    lower = norm_s.lower()
+    words = lower.split()
+    n_words = max(len(words), 1)
+    factual_hits = sum(1 for kw in FACTUAL_CLAIM_INDICATORS if kw in lower)
+    subj_hits = sum(1 for kw in SUBJECTIVE_CHITCHAT_INDICATORS if kw in lower)
+    personal_pronouns = sum(
+        1 for w in ["mình", "tôi", "em", "shop", "cả nhà", "mọi người", "các bác", "anh em", "nhé", "nha", "ạ", "haha", "hihi", "ơi"]
+        if re.search(rf"\b{re.escape(w)}\b", lower)
+    )
+    official_cues = sum(
+        1 for w in ["theo", "quyết định", "nghị định", "thông tư", "bộ", "cục", "ngân hàng", "chính phủ", "công bố", "xác nhận", "bác bỏ", "cảnh báo", "triển khai", "ban hành", "quy định", "tuyển sinh", "vắc-xin", "lãi suất", "tăng", "giảm"]
+        if w in lower
+    )
+    num_count = len(re.findall(r"\d+", lower))
+    has_date_pattern = 1.0 if re.search(r"\b(\d{1,2}/\d{1,2}|20\d{2}|tháng\s+\d+|năm\s+20\d{2})\b", lower) else 0.0
+    has_unit_pattern = 1.0 if re.search(r"\b(triệu|tỷ|nghìn|%|\bđồng|usd|km|tuổi|ca\b|tỉnh|thành phố)\b", lower) else 0.0
+    exclam_question = norm_s.count("!") + norm_s.count("?")
+    return np.asarray([[
+        min(1.0, n_words / 35.0),
+        min(1.0, factual_hits / 3.0),
+        min(1.0, subj_hits / 2.0),
+        min(1.0, personal_pronouns / 2.0),
+        min(1.0, official_cues / 3.0),
+        min(1.0, num_count / 3.0),
+        has_date_pattern,
+        has_unit_pattern,
+        min(1.0, exclam_question / 3.0),
+    ]], dtype=np.float32)
+
+
 def predict_check_worthiness(sentence: str) -> Dict[str, Any]:
     """
-    Node 3A: Mô hình phân loại Check-worthiness (Text Classification cho Check-worthiness).
+    Node 3A: Mô hình phân loại Check-worthiness (Hybrid ML Classifier: TF-IDF + Linguistic Features
+    kết hợp Heuristic Fallback).
     Xác định một câu có phải là mệnh đề thực tế cần kiểm chứng (Check-worthy Factual Claim)
     hay chỉ là câu cảm thán, ý kiến cá nhân, lời chào hỏi trên mạng xã hội.
     """
@@ -81,10 +142,31 @@ def predict_check_worthiness(sentence: str) -> Dict[str, Any]:
             "sentence": norm_s,
             "is_check_worthy": False,
             "check_worthiness_score": 0.10,
-            "claim_type": "Too Short / Fragment"
+            "claim_type": "Too Short / Fragment",
+            "model_used": "LENGTH_FILTER"
         }
 
-    # Đếm tín hiệu thực tế (số liệu, ngày tháng, tổ chức, động từ khẳng định/chính sách)
+    # Ưu tiên sử dụng mô hình ML Check-worthiness đã huấn luyện nếu có
+    bundle = _load_cw_model()
+    if bundle is not None and "tfidf" in bundle and "clf" in bundle:
+        try:
+            x_tfidf = bundle["tfidf"].transform([lower_s]).toarray()
+            x_struct = _extract_single_structural_features(norm_s)
+            x_full = np.hstack([x_tfidf * 0.65, x_struct * 1.35])
+            prob = float(bundle["clf"].predict_proba(x_full)[0][1])
+            score = max(0.02, min(0.99, round(prob, 3)))
+            is_worthy = score >= 0.50
+            return {
+                "sentence": norm_s,
+                "is_check_worthy": is_worthy,
+                "check_worthiness_score": score,
+                "claim_type": "Factual Claim (Đáng kiểm chứng)" if is_worthy else "Opinion / Social Chitchat (Không cần kiểm chứng)",
+                "model_used": "ML_LOGISTIC_TFIDF_STRUCTURAL"
+            }
+        except Exception:
+            pass
+
+    # Fallback: Đếm tín hiệu thực tế (số liệu, ngày tháng, tổ chức, động từ khẳng định/chính sách)
     factual_hits = sum(1 for kw in FACTUAL_CLAIM_INDICATORS if kw in lower_s)
     has_numbers = bool(re.search(r"\d+", lower_s))
     has_capitals = bool(re.search(r"[A-ZĐÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴ]", norm_s[1:]))
@@ -105,7 +187,8 @@ def predict_check_worthiness(sentence: str) -> Dict[str, Any]:
         "sentence": norm_s,
         "is_check_worthy": is_worthy,
         "check_worthiness_score": score,
-        "claim_type": "Factual Claim (Đáng kiểm chứng)" if is_worthy else "Opinion / Social Chitchat (Không cần kiểm chứng)"
+        "claim_type": "Factual Claim (Đáng kiểm chứng)" if is_worthy else "Opinion / Social Chitchat (Không cần kiểm chứng)",
+        "model_used": "HEURISTIC_FALLBACK"
     }
 
 
